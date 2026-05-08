@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Patched two Dependabot security advisories** — Resolved `GHSA-p7fg-763f-g4gf` (Anthropic TypeScript SDK insecure default file permissions in `BetaLocalFilesystemMemoryTool`, CVE-2026-41686) by forcing `@anthropic-ai/sdk >= 0.91.1` via root `pnpm.overrides`, and `GHSA-v2v4-37r5-5v8g` (XSS in `ip-address` `Address6` HTML-emitting methods, CVE-2026-42338) by forcing `ip-address >= 10.1.1`. Overrides were necessary because the vulnerable copies are pinned by transitive deps that have not yet released a fix. ([CYPACK-1182](https://linear.app/ceedar/issue/CYPACK-1182))
+
 ## [0.2.51] - 2026-04-30
 
 ### Changed
