@@ -68,6 +68,30 @@ Execute test drives that verify:
    - activities appear
    - agent is processing issue
 
+### Phase 3.5: Slack Chat Session Verification (optional)
+
+Use when validating the Slack → ChatSessionHandler → ClaudeRunner path. F1 exposes a test-only endpoint `/cli/dispatch-chat` that injects a synthetic `app_mention` event without going through Slack signature verification (`SlackChatAdapter` no-ops Slack API calls when `slackBotToken` is undefined).
+
+1. Dispatch a synthetic chat event:
+   ```bash
+   CYRUS_PORT=3600 ./f1 start-chat-session \
+     --channel C_TEST_CHAN \
+     --user U_TEST_USER \
+     --text "hello"
+   ```
+   The response contains a `threadKey` of the form `<channel>:<ts>`. Reuse the same `--thread-ts` to address the same chat thread on subsequent dispatches.
+
+2. Verify per-thread auto-memory wiring:
+   - The chat workspace exists at `<cyrusHome>/slack-workspaces/<sanitized-threadKey>/`.
+   - The auto-memory directory exists (or is lazily creatable) at `<workspacePath>/memory/`.
+   - The `claude_query_options` event emitted by `ClaudeRunner` carries `cqo.settingsAutoMemoryDirectory` pointing at the expected per-thread memory path.
+
+3. Verify thread reuse:
+   - Dispatch a second event with the same `--thread-ts` and confirm the workspace and memory dir are reused (mtime advances; not recreated).
+
+4. Verify thread isolation:
+   - Dispatch a third event in a different channel/thread and confirm a separate `slack-workspaces/<other-thread-key>/memory/` directory is created.
+
 ### Phase 4: Renderer Verification
 
 1. Validate activity payload quality:

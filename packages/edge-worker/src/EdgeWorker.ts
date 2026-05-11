@@ -2363,6 +2363,26 @@ ${taskSection}`;
 	}
 
 	/**
+	 * Test-only: dispatch a synthetic Slack webhook event through the chat
+	 * session handler. Used by the F1 test harness to exercise the Slack →
+	 * ClaudeRunner code path end-to-end without a real Slack signature.
+	 */
+	async dispatchChatTestEvent(event: SlackWebhookEvent): Promise<void> {
+		if (!this.chatSessionHandler) {
+			throw new Error("chatSessionHandler not initialized");
+		}
+		await this.chatSessionHandler.handleEvent(event);
+	}
+
+	/**
+	 * Public accessor for the shared Fastify-based application server.
+	 * Used by F1 to register test-only routes alongside production webhook routes.
+	 */
+	getSharedApplicationServer(): SharedApplicationServer {
+		return this.sharedApplicationServer;
+	}
+
+	/**
 	 * Stop the edge worker
 	 */
 	async stop(): Promise<void> {

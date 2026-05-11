@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { join } from "node:path";
 import type {
 	HookCallbackMatcher,
 	HookEvent,
@@ -186,6 +187,7 @@ export class RunnerConfigBuilder {
 			allowedDirectories: [input.workspacePath, ...repositoryPaths],
 			workspaceName: input.workspaceName,
 			cyrusHome: input.cyrusHome,
+			autoMemoryDirectory: join(input.workspacePath, "memory"),
 			appendSystemPrompt: input.systemPrompt,
 			...(mcpConfig ? { mcpConfig } : {}),
 			...(mcpConfigPath ? { mcpConfigPath } : {}),

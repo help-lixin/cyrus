@@ -434,6 +434,14 @@ export interface AgentRunnerConfig {
 	tools?: string[];
 	/** Cyrus home directory (required) */
 	cyrusHome: string;
+	/**
+	 * Custom directory path for Claude's auto-memory storage. Forwarded to the
+	 * Claude SDK as settings.autoMemoryDirectory. When unset, the SDK falls
+	 * back to its default (~/.claude/projects/<sanitized-cwd>/memory/). Chat
+	 * sessions set this to a per-thread directory so memory persists across
+	 * resumes in the same thread without leaking between threads.
+	 */
+	autoMemoryDirectory?: string;
 	/** Prompt template version information */
 	promptVersions?: {
 		userPromptVersion?: string;
