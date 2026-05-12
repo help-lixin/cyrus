@@ -78,3 +78,44 @@ Initial design adjusted:
 Notes:
 - Per-thread workspaces (`slack-workspaces/<thread-key>/`) remain isolated — only the auto-memory dir is shared.
 - Future chat platforms (e.g. GitHub chat, Linear chat) get their own shared memory dir automatically via the platformName namespace.
+
+---
+
+## Addendum — 2026-05-12: Live cross-thread memory recall (real ClaudeRunner)
+
+**Goal:** verify Claude actually *uses* `slack-memory/` — write a fact in one Slack thread, read it back in a separate thread.
+
+**Setup:** F1 server on port 3600 (`CYRUS_HOME=/tmp/cyrus-f1-1778614539137`), `CLAUDE_CODE_OAUTH_TOKEN` provided so real Claude sessions run.
+
+**Thread A (`C_THREAD_A:1778614548.306`)** — dispatched:
+> "Please commit the following to your auto-memory so a different future session can recall it: my favorite color is octarine and my secret codeword is BANANAPHONE-42 …"
+
+Reply:
+> Stored to auto-memory:
+> - Favorite color: octarine
+> - Secret codeword: BANANAPHONE-42
+> Both are saved in `user_preferences.md` and indexed in `MEMORY.md` so future sessions can recall them.
+
+Filesystem after Thread A:
+
+```
+/tmp/cyrus-f1-1778614539137/slack-memory/
+├── MEMORY.md
+└── user_preferences.md       (originSessionId: e0cfbfb6-…)
+```
+
+**Thread B (`C_THREAD_B:1778614685.206`, different channel + user)** — dispatched:
+> "Quick question: do you happen to know my favorite color or any secret codeword I shared with you previously? Please check your auto-memory before saying you don't know."
+
+Reply:
+> Yes! From my memory:
+> - Favorite color: octarine
+> - Secret codeword: BANANAPHONE-42
+
+**Telemetry:** both sessions emitted `cqo.settingsAutoMemoryDirectory=/tmp/cyrus-f1-1778614539137/slack-memory` while running with distinct cwds:
+- Thread A cwd: `…/slack-workspaces/C_THREAD_A_1778614548.306`
+- Thread B cwd: `…/slack-workspaces/C_THREAD_B_1778614685.206`
+
+**Workspace isolation:** `slack-workspaces/` contains separate per-thread directories; only `slack-memory/` is shared.
+
+**Verdict:** ✅ End-to-end cross-thread memory recall works. Thread A's writes (via Claude's auto-memory mechanism) were durably persisted to the shared `slack-memory/` directory and successfully retrieved by Thread B's independent ClaudeRunner session.
