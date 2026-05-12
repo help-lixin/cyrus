@@ -71,6 +71,8 @@ export interface ChatRunnerConfigInput {
 	sessionId: string;
 	resumeSessionId?: string;
 	cyrusHome: string;
+	/** Chat platform name (e.g. "slack") — used to namespace the shared auto-memory dir */
+	platformName: string;
 	/** Linear workspace ID for building fresh MCP config at session start */
 	linearWorkspaceId?: string;
 	/** Repository to source user-configured MCP paths from (V1: first available repo) */
@@ -187,7 +189,13 @@ export class RunnerConfigBuilder {
 			allowedDirectories: [input.workspacePath, ...repositoryPaths],
 			workspaceName: input.workspaceName,
 			cyrusHome: input.cyrusHome,
-			autoMemoryDirectory: join(input.workspacePath, "memory"),
+			// Shared auto-memory across all chat threads on this platform. Lives
+			// under cyrusHome (not the per-thread workspace) so memory built up in
+			// one Slack thread is available to every other Slack thread.
+			autoMemoryDirectory: join(
+				input.cyrusHome,
+				`${input.platformName}-memory`,
+			),
 			appendSystemPrompt: input.systemPrompt,
 			...(mcpConfig ? { mcpConfig } : {}),
 			...(mcpConfigPath ? { mcpConfigPath } : {}),

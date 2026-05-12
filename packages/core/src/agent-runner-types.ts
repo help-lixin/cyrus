@@ -438,8 +438,8 @@ export interface AgentRunnerConfig {
 	 * Custom directory path for Claude's auto-memory storage. Forwarded to the
 	 * Claude SDK as settings.autoMemoryDirectory. When unset, the SDK falls
 	 * back to its default (~/.claude/projects/<sanitized-cwd>/memory/). Chat
-	 * sessions set this to a per-thread directory so memory persists across
-	 * resumes in the same thread without leaking between threads.
+	 * sessions set this to a per-platform shared directory so memory built up
+	 * in one chat thread carries over to every other thread on that platform.
 	 */
 	autoMemoryDirectory?: string;
 	/** Prompt template version information */

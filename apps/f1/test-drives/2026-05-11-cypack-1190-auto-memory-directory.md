@@ -1,9 +1,9 @@
 # Test Drive: CYPACK-1190 — autoMemoryDirectory for Slack chat sessions
 
 **Date**: 2026-05-11
-**Goal**: Verify the new Claude Code SDK `settings.autoMemoryDirectory` setting is threaded through `ClaudeRunner` for Slack-triggered chat sessions and is namespaced per Slack thread (`<workspacePath>/memory`).
+**Goal**: Verify the new Claude Code SDK `settings.autoMemoryDirectory` setting is threaded through `ClaudeRunner` for Slack-triggered chat sessions and is shared across all Slack threads (one auto-memory dir per platform, not per thread).
 **Test Repo**: `/tmp/cypack-1190-test` (minimal init repo)
-**Cyrus Home**: `/tmp/cyrus-f1-1778542605771`
+**Cyrus Home**: `/tmp/cyrus-f1-1778544835252`
 **F1 Port**: 3699
 
 ## Verification Results
@@ -17,22 +17,15 @@
 - [x] `AgentRunnerConfig.autoMemoryDirectory` field added in `packages/core/src/agent-runner-types.ts`
 - [x] `ClaudeRunnerConfig.autoMemoryDirectory` field added in `packages/claude-runner/src/types.ts`
 - [x] `ClaudeRunner` forwards `settings: { autoMemoryDirectory }` to SDK `query()` options
-- [x] `RunnerConfigBuilder.buildChatConfig` defaults to `join(workspacePath, "memory")`
+- [x] `RunnerConfigBuilder.buildChatConfig` defaults to `<cyrusHome>/<platformName>-memory` for chat sessions
+- [x] `ChatSessionHandler` forwards `adapter.platformName` into `buildChatConfig`
 - [x] `buildSanitizedQueryOptions` surfaces `settingsAutoMemoryDirectory` so the `claude_query_options` telemetry event includes it
 
-### Per-thread namespacing
-- [x] First dispatch to `C_TEST1` created workspace `slack-workspaces/C_TEST1_1778542611.55/`
-- [x] Memory dir auto-created at `slack-workspaces/C_TEST1_1778542611.55/memory/` (mtime 1778542616)
-- [x] Telemetry event reports `cqo.settingsAutoMemoryDirectory=/tmp/cyrus-f1-1778542605771/slack-workspaces/C_TEST1_1778542611.55/memory`
-
-### Thread reuse (same channel + thread_ts)
-- [x] Second dispatch with `--thread-ts 1778542611.55` reused the existing workspace (no new dir created)
-- [x] Only one `C_TEST1_1778542611.55/` directory remained after the second dispatch
-
-### Thread isolation (different channel)
-- [x] Third dispatch to `C_TEST2` created a separate workspace `slack-workspaces/C_TEST2_1778542634.519/`
-- [x] Separate memory dir at `slack-workspaces/C_TEST2_1778542634.519/memory/` (mtime 1778542636)
-- [x] Telemetry event reports the new per-thread path
+### Cross-thread sharing
+- [x] First dispatch to `C_TEST1` resolved memory dir to `/tmp/cyrus-f1-1778544835252/slack-memory`
+- [x] Second dispatch to a different channel `C_TEST2` resolved to the **same** `slack-memory` dir
+- [x] Single `slack-memory/` directory exists under `cyrusHome` (no per-thread subdirs)
+- [x] Per-thread workspaces remain isolated under `slack-workspaces/<thread-key>/`; only the memory dir is shared
 
 ## Session Log
 
@@ -45,43 +38,43 @@ $ CYRUS_PORT=3699 CYRUS_REPO_PATH=/tmp/cypack-1190-test bun run apps/f1/server.t
 
 ### Dispatches
 ```
-$ curl -s -X POST http://localhost:3699/cli/dispatch-chat -d '{"channel":"C_TEST1","user":"U_TEST1","text":"hello"}'
-{"ok":true,"eventId":"f1-1778542611.55","threadKey":"C_TEST1:1778542611.55"}
+$ curl -s -X POST http://localhost:3699/cli/dispatch-chat -d '{"channel":"C_TEST1","user":"U1","text":"first"}'
+{"ok":true,"eventId":"f1-1778544840.941","threadKey":"C_TEST1:1778544840.941"}
 
-$ curl -s -X POST http://localhost:3699/cli/dispatch-chat -d '{"channel":"C_TEST1","user":"U_TEST1","text":"again","threadTs":"1778542611.55"}'
-{"ok":true,"eventId":"f1-1778542631.493","threadKey":"C_TEST1:1778542611.55"}
-
-$ curl -s -X POST http://localhost:3699/cli/dispatch-chat -d '{"channel":"C_TEST2","user":"U_TEST2","text":"isolated"}'
-{"ok":true,"eventId":"f1-1778542634.519","threadKey":"C_TEST2:1778542634.519"}
+$ curl -s -X POST http://localhost:3699/cli/dispatch-chat -d '{"channel":"C_TEST2","user":"U2","text":"second"}'
+{"ok":true,"eventId":"f1-1778544842.997","threadKey":"C_TEST2:1778544842.997"}
 ```
 
-### Workspace + memory dirs
+### cyrusHome layout
 ```
-$ ls slack-workspaces/
-C_TEST1_1778542611.55
-C_TEST2_1778542634.519
-
-$ stat -f '%N %m' slack-workspaces/*/memory
-.../C_TEST1_1778542611.55/memory 1778542616
-.../C_TEST2_1778542634.519/memory 1778542636
+$ ls /tmp/cyrus-f1-1778544835252/
+cyrus-skills-plugin
+logs
+mcp-configs
+repos
+slack-memory          <-- shared across all Slack threads
+slack-workspaces      <-- per-thread workspaces (still isolated)
+state
+worktrees
 ```
 
 ### Telemetry (claude_query_options)
 ```
-cqo.settingsAutoMemoryDirectory=/tmp/cyrus-f1-1778542605771/slack-workspaces/C_TEST1_1778542611.55/memory
-cqo.settingsAutoMemoryDirectory=/tmp/cyrus-f1-1778542605771/slack-workspaces/C_TEST2_1778542634.519/memory
+cqo.settingsAutoMemoryDirectory=/tmp/cyrus-f1-1778544835252/slack-memory
+cqo.settingsAutoMemoryDirectory=/tmp/cyrus-f1-1778544835252/slack-memory
 ```
+Same path emitted for both threads — confirms cross-thread sharing.
 
 ## Final Retrospective
 
 What worked:
-- The SDK creates the memory directory lazily — no explicit `mkdir` needed in `ChatSessionHandler.createWorkspace`.
-- The `SlackChatAdapter`'s no-token bailout cleanly allows synthetic dispatches without touching Slack APIs.
-- Surfacing `settingsAutoMemoryDirectory` in the telemetry sanitizer made verification trivial.
+- Threading `adapter.platformName` from `ChatSessionHandler` into `buildChatConfig` cleanly resolves the shared-memory path without touching the per-thread workspace layout.
+- `SlackChatAdapter`'s no-token bailout still allows synthetic F1 dispatches.
+- The `cqo.settingsAutoMemoryDirectory` telemetry attribute made it easy to confirm both dispatches resolved to the same memory path.
 
-Issue caught during validation:
-- Initial F1 route registration was after `edgeWorker.start()` and tripped `FST_ERR_INSTANCE_ALREADY_LISTENING`. Moved the `fastify.post` registration before `start()` and the route mounted cleanly.
+Initial design adjusted:
+- The first cut namespaced the memory dir per-thread (`<workspacePath>/memory`). User feedback clarified that memory should be shared across all Slack threads, not isolated per thread. Reworked to `<cyrusHome>/<platformName>-memory`.
 
 Notes:
-- Re-dispatch to the same thread didn't emit a fresh `claude_query_options` event because the existing runner is reused for additional prompts — that's the correct behavior, and the workspace/memory-dir-reuse check is still valid via the directory listing.
-- Acceptance criteria for CYPACK-1190 met end-to-end.
+- Per-thread workspaces (`slack-workspaces/<thread-key>/`) remain isolated — only the auto-memory dir is shared.
+- Future chat platforms (e.g. GitHub chat, Linear chat) get their own shared memory dir automatically via the platformName namespace.

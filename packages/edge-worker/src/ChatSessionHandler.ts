@@ -482,6 +482,7 @@ export class ChatSessionHandler<TEvent> {
 			sessionId,
 			resumeSessionId,
 			cyrusHome: this.deps.cyrusHome,
+			platformName: this.adapter.platformName,
 			linearWorkspaceId: provider.getDefaultLinearWorkspaceId(),
 			repository: provider.getDefaultRepository(),
 			repositoryPaths: provider.getRepositoryPaths(),

@@ -81,16 +81,15 @@ Use when validating the Slack → ChatSessionHandler → ClaudeRunner path. F1 e
    ```
    The response contains a `threadKey` of the form `<channel>:<ts>`. Reuse the same `--thread-ts` to address the same chat thread on subsequent dispatches.
 
-2. Verify per-thread auto-memory wiring:
+2. Verify shared auto-memory wiring:
    - The chat workspace exists at `<cyrusHome>/slack-workspaces/<sanitized-threadKey>/`.
-   - The auto-memory directory exists (or is lazily creatable) at `<workspacePath>/memory/`.
-   - The `claude_query_options` event emitted by `ClaudeRunner` carries `cqo.settingsAutoMemoryDirectory` pointing at the expected per-thread memory path.
+   - The shared auto-memory directory exists (or is lazily creatable) at `<cyrusHome>/slack-memory/`.
+   - The `claude_query_options` event emitted by `ClaudeRunner` carries `cqo.settingsAutoMemoryDirectory=<cyrusHome>/slack-memory`.
 
-3. Verify thread reuse:
-   - Dispatch a second event with the same `--thread-ts` and confirm the workspace and memory dir are reused (mtime advances; not recreated).
-
-4. Verify thread isolation:
-   - Dispatch a third event in a different channel/thread and confirm a separate `slack-workspaces/<other-thread-key>/memory/` directory is created.
+3. Verify per-thread workspace isolation alongside shared memory:
+   - Dispatch a second event in a different channel/thread.
+   - Confirm a separate `slack-workspaces/<other-thread-key>/` directory exists (workspaces remain isolated).
+   - Confirm both dispatches' telemetry resolve to the **same** `slack-memory` path (memory is shared).
 
 ### Phase 4: Renderer Verification
 
