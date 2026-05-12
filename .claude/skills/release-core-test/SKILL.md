@@ -1,6 +1,6 @@
 ---
 name: release-core-test
-description: Dev-only release of the cyrus-core package as a prerelease (-test.N) published under the npm `test` dist-tag. Skips changelog, git tags, GitHub release, and Linear updates.
+description: Invoke when dev-testing a Cyrus change that spans CYPACK (edgeworker + CLI) and CYHOST (Vercel-hosted GUI) and the hosted GUI needs to point at an unreleased `cyrus-core` from this repo. Publishes `cyrus-core` (and `claude-runner` if needed) as a `-test.N` prerelease under the npm `test` dist-tag so CYHOST can install it via `cyrus-core@test` without affecting the `latest` dist-tag or shipping a real release.
 ---
 
 # Release Core (Test)
