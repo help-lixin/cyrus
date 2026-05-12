@@ -60,13 +60,56 @@ describe("inspectGitGuardrail", () => {
 		}
 	});
 
-	it("returns a guardrail message when there are uncommitted changes", () => {
+	it("returns a guardrail message when there are uncommitted tracked changes", () => {
 		git(workdir, "init -b main");
 		writeFileSync(join(workdir, "a.txt"), "stuff\n");
+		git(workdir, "add a.txt");
 
 		const message = inspectGitGuardrail(workdir, silentLogger);
 		expect(message).toContain("1 uncommitted file change");
 		expect(message).toContain("Create or update a pull request");
+	});
+
+	it("does not block when the only worktree changes are untracked files", () => {
+		const remote = mkdtempSync(join(tmpdir(), "cyrus-stop-hook-remote-"));
+		try {
+			execSync(`git init --bare`, { cwd: remote, stdio: "ignore" });
+			git(workdir, "init -b main");
+			git(workdir, `remote add origin ${remote}`);
+			writeFileSync(join(workdir, "README.md"), "hello\n");
+			git(workdir, "add README.md");
+			git(workdir, 'commit -m "init"');
+			git(workdir, "push -u origin main");
+
+			writeFileSync(join(workdir, "scratch.txt"), "local-only\n");
+			writeFileSync(join(workdir, ".env.local"), "SECRET=1\n");
+
+			expect(inspectGitGuardrail(workdir, silentLogger)).toBeNull();
+		} finally {
+			rmSync(remote, { recursive: true, force: true });
+		}
+	});
+
+	it("blocks on tracked modifications even when untracked files exist, counting only the modified file", () => {
+		const remote = mkdtempSync(join(tmpdir(), "cyrus-stop-hook-remote-"));
+		try {
+			execSync(`git init --bare`, { cwd: remote, stdio: "ignore" });
+			git(workdir, "init -b main");
+			git(workdir, `remote add origin ${remote}`);
+			writeFileSync(join(workdir, "README.md"), "hello\n");
+			git(workdir, "add README.md");
+			git(workdir, 'commit -m "init"');
+			git(workdir, "push -u origin main");
+
+			writeFileSync(join(workdir, "README.md"), "modified\n");
+			writeFileSync(join(workdir, "scratch.txt"), "local-only\n");
+
+			const message = inspectGitGuardrail(workdir, silentLogger);
+			expect(message).toContain("1 uncommitted file change");
+			expect(message).not.toContain("2 uncommitted file changes");
+		} finally {
+			rmSync(remote, { recursive: true, force: true });
+		}
 	});
 
 	it("counts commits ahead of upstream as unshipped work", () => {

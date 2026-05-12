@@ -544,7 +544,12 @@ export class RunnerConfigBuilder {
 
 /**
  * Inspect the working tree at `cwd` and return a guardrail message if there
- * is unshipped work (uncommitted changes or commits ahead of the upstream).
+ * is unshipped work (uncommitted tracked changes or commits ahead of the
+ * upstream). Untracked files are ignored — they may legitimately exist in the
+ * worktree without belonging to the session (local scratch, env files, IDE
+ * artifacts). Anything the agent intends to ship will be staged and surface
+ * as a tracked change.
+ *
  * Returns null when the tree is clean, when `cwd` isn't a git repo, or when
  * git is unavailable — in those cases the stop should not be blocked.
  */
@@ -559,7 +564,7 @@ export function inspectGitGuardrail(cwd: string, log: ILogger): string | null {
 
 	let status: string;
 	try {
-		status = runGit("status --porcelain");
+		status = runGit("status --porcelain --untracked-files=no");
 	} catch (err) {
 		log.debug(
 			`PR guardrail: skipping (cwd is not a git repo or git failed): ${(err as Error).message}`,
