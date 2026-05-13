@@ -6,7 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **Memory-pressure gate and concurrency cap for new sessions** — Cyrus can now refuse to spin up a new session when the host is running out of memory or already at a configured session ceiling, posting a short "temporarily out of capacity" message back to Linear, GitHub, GitLab, or Slack instead of silently getting OOM-killed by the kernel or systemd. The gate is a single intuitive knob: `memoryGate: true` enables it at a default 85% pressure threshold, `memoryGate: 0.9` sets a custom threshold, and `memoryGate: false` (or omitted) disables it. "Pressure" is the worst of process RSS, V8 heap, and used system memory — a single percentage that's portable across host sizes. Combined with the new `maxConcurrentRunners` cap, both knobs use cross-platform Node built-ins so they behave identically on Linux and macOS.
+- **Shared auto-memory across Slack chat sessions** — Slack-triggered chat sessions now share a persistent Claude auto-memory directory at `<cyrusHome>/slack-memory/`, so memory built up in one Slack thread carries over to every other Slack thread. ([CYPACK-1190](https://linear.app/ceedar/issue/CYPACK-1190), [#1199](https://github.com/cyrusagents/cyrus/pull/1199))
 
+### Fixed
+- **Slack chat sessions can now read and edit their shared auto-memory** — The shared auto-memory directory (`<cyrusHome>/slack-memory/`) is now included in `allowedDirectories` for chat sessions. Previously, sessions could create new memory files via shell redirects, but `Read`/`Edit`/`Glob` against existing memory files (including `MEMORY.md`) were denied by the home-directory restriction rules, leaving the auto-memory feature half-working. ([CYPACK-1197](https://linear.app/ceedar/issue/CYPACK-1197), [#1206](https://github.com/cyrusagents/cyrus/pull/1206))
+
+### Changed
+- **Slack mention prompt nudges agents toward `linear_agent_give_feedback` for live child sessions** — When responding in Slack, Cyrus is now told to send mid-flight corrections to a running child agent session via `mcp__cyrus-tools__linear_agent_give_feedback` instead of falling back to `mcp__linear__save_comment`. Produces a stronger signal when correcting work that is already in progress. ([CYPACK-1189](https://linear.app/ceedar/issue/CYPACK-1189), [#1198](https://github.com/cyrusagents/cyrus/pull/1198))
 
 ## [0.2.51] - 2026-04-30
 
