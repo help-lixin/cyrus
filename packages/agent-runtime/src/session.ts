@@ -266,16 +266,26 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 	}
 
 	async stop(reason?: string): Promise<void> {
+		if (this.stopped) return;
 		this.stopped = true;
 		await this.emitEvent(this.createEvent("stop.requested", { reason }));
 		this.abortController.abort();
 		this.inputBuffer.close();
-		await this.destroySandboxOnce();
 		this.eventBuffer.close();
 	}
 
+	async destroy(): Promise<void> {
+		// If a run is still in flight, cancel it first so the harness process
+		// terminates cleanly before we tear down the sandbox. Idempotent —
+		// safe to call after a run has already completed or been stopped.
+		if (this.started && !this.stopped) {
+			await this.stop("destroy");
+		}
+		await this.destroySandboxOnce();
+	}
+
 	/**
-	 * Idempotent sandbox teardown. Backs both `AgentSession.stop()` and
+	 * Idempotent sandbox teardown. Backs both `AgentSession.destroy()` and
 	 * the `destroy()` method on returned `AgentSessionResult`s, so callers
 	 * can safely call either or both without double-destroying the
 	 * underlying ComputeSDK / local sandbox.

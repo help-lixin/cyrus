@@ -377,11 +377,12 @@ describe("AgentRuntime", () => {
 		);
 	});
 
-	it("exposes destroy() on AgentSessionResult that releases the sandbox exactly once", async () => {
-		// Verifies that the ComputeSDK-style destroy escape hatch is reachable
-		// from the result object, that it's idempotent, and that the session's
-		// stop() shares the same one-shot — so callers can call either or both
-		// without double-destroying the underlying sandbox.
+	it("decouples stop() from sandbox destruction; destroy() is the only release path", async () => {
+		// stop() cancels the run; destroy() releases the sandbox. They are
+		// separate operations: stop() must NOT destroy, and destroy() can
+		// be called independently. Both AgentSession.destroy() and
+		// AgentSessionResult.destroy() share a one-shot, so calling either
+		// or both is safe.
 		const sandbox = new FakeSandbox(
 			JSON.stringify({
 				type: "item.completed",
@@ -400,22 +401,63 @@ describe("AgentRuntime", () => {
 		const result = await session.start();
 		expect(result.success).toBe(true);
 		expect(typeof result.destroy).toBe("function");
-
-		// Before destroy: sandbox.destroy has not been called.
-		expect(
-			sandbox.commands.find((c) => c.command === "DESTROY"),
-		).toBeUndefined();
+		expect(typeof session.destroy).toBe("function");
 		expect(sandbox.destroyed).toBe(0);
 
-		await result.destroy();
-		expect(sandbox.destroyed).toBe(1);
-
-		// Idempotent — calling again must not invoke sandbox.destroy a second time.
-		await result.destroy();
-		expect(sandbox.destroyed).toBe(1);
-
-		// And stop() shares the same one-shot, so it doesn't double-destroy either.
+		// stop() must NOT destroy the sandbox.
 		await session.stop();
+		expect(sandbox.destroyed).toBe(0);
+
+		// destroy() on the result releases the sandbox exactly once.
+		await result.destroy();
+		expect(sandbox.destroyed).toBe(1);
+
+		// Idempotent — calling result.destroy() again is a no-op.
+		await result.destroy();
+		expect(sandbox.destroyed).toBe(1);
+
+		// Calling session.destroy() afterward shares the one-shot, also no-op.
+		await session.destroy();
+		expect(sandbox.destroyed).toBe(1);
+	});
+
+	it("session.destroy() cancels an in-flight run and releases the sandbox", async () => {
+		// destroy() on the live session should: (a) cancel the harness if
+		// still running via stop(), (b) release the sandbox exactly once.
+		// The streaming fake's schedule is intentionally long enough that
+		// we can call destroy() mid-run.
+		const sandbox = new StreamingFakeSandbox([
+			{ delayMs: 50, stdout: "" },
+			{
+				delayMs: 500,
+				stdout: `${JSON.stringify({
+					type: "item.completed",
+					item: { type: "agent_message", text: "should-not-arrive" },
+				})}\n`,
+			},
+		]);
+		const session = await createAgentSession(
+			{
+				sessionId: "session-destroy-live",
+				harness: "codex",
+				userPrompt: "anything",
+			},
+			{ sandboxProviders: { local: new FakeSandboxProvider(sandbox) } },
+		);
+
+		const startPromise = session.start();
+		await new Promise((resolve) => setTimeout(resolve, 80));
+		// Run is in flight; destroy must both cancel and release.
+		await session.destroy();
+		expect(sandbox.destroyed).toBe(1);
+
+		const result = await startPromise;
+		// The destroy() path goes through stop() which emits stop.requested.
+		expect(result.events.some((e) => e.kind === "stop.requested")).toBe(true);
+
+		// Idempotent — calling either destroy again is a no-op.
+		await session.destroy();
+		await result.destroy();
 		expect(sandbox.destroyed).toBe(1);
 	});
 
@@ -508,6 +550,7 @@ class StreamingFakeSandbox implements RunnerSandbox {
 	readonly stdinChunks: string[] = [];
 	streamCalls = 0;
 	runCalls = 0;
+	destroyed = 0;
 
 	constructor(private readonly schedule: readonly ScheduledChunk[]) {}
 
@@ -537,8 +580,30 @@ class StreamingFakeSandbox implements RunnerSandbox {
 
 		let stdoutBuf = "";
 		let stderrBuf = "";
+		let exitCode = 0;
 		for (const event of this.schedule) {
-			await new Promise((resolve) => setTimeout(resolve, event.delayMs));
+			// Honor cancellation so callers that abort via session.stop() /
+			// session.destroy() get a timely return rather than waiting out
+			// the schedule.
+			if (options.signal?.aborted) {
+				exitCode = 137; // SIGKILL-ish, common convention for cancelled
+				break;
+			}
+			await new Promise<void>((resolve) => {
+				const timer = setTimeout(resolve, event.delayMs);
+				options.signal?.addEventListener(
+					"abort",
+					() => {
+						clearTimeout(timer);
+						resolve();
+					},
+					{ once: true },
+				);
+			});
+			if (options.signal?.aborted) {
+				exitCode = 137;
+				break;
+			}
 			if (event.stdout) {
 				stdoutBuf += event.stdout;
 				options.onStdout?.(event.stdout);
@@ -554,12 +619,14 @@ class StreamingFakeSandbox implements RunnerSandbox {
 		return {
 			stdout: stdoutBuf,
 			stderr: stderrBuf,
-			exitCode: 0,
+			exitCode,
 			durationMs: Date.now() - startedAt,
 		};
 	}
 
-	async destroy(): Promise<void> {}
+	async destroy(): Promise<void> {
+		this.destroyed += 1;
+	}
 }
 
 class FakeSandbox implements RunnerSandbox {

@@ -364,5 +364,22 @@ export interface AgentSession {
 	start(): Promise<AgentSessionResult>;
 	addMessage(message: string): Promise<void>;
 	interrupt(reason?: string): Promise<void>;
+	/**
+	 * Cancel the in-flight run. Aborts the running harness process, closes
+	 * the live event stream, and closes the input pipe. Does NOT release
+	 * the underlying sandbox — call {@link destroy} for that. Idempotent.
+	 */
 	stop(reason?: string): Promise<void>;
+	/**
+	 * Release the underlying sandbox. Equates to ComputeSDK's
+	 * `ProviderSandbox.destroy()` for ComputeSDK-backed providers
+	 * (deletes the remote sandbox and releases compute resources); for
+	 * the local provider it is a no-op. If a run is still in flight,
+	 * cancels it first via {@link stop} so the harness process
+	 * terminates cleanly before teardown. Idempotent.
+	 *
+	 * Shares its one-shot teardown with {@link AgentSessionResult.destroy},
+	 * so calling either or both in any order is safe.
+	 */
+	destroy(): Promise<void>;
 }
