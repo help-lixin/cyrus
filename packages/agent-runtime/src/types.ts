@@ -103,6 +103,14 @@ export interface CreateAgentSessionConfig {
 	sandbox?: RuntimeSandboxConfig;
 	networkEgress?: RuntimeNetworkEgressConfig;
 	metadata?: Record<string, unknown>;
+	/**
+	 * When `true`, opens an interactive stdin pipe to the harness process so
+	 * `addMessage()` chunks reach the running CLI live. Default `false` —
+	 * most one-shot harness CLIs (e.g. `codex exec`) hang if stdin is piped
+	 * without being closed, so this is opt-in. Set to `true` for harnesses
+	 * that consume `--input-format stream-json` or similar.
+	 */
+	interactiveInput?: boolean;
 }
 
 export interface TranscriptEvent {
@@ -172,6 +180,29 @@ export interface SandboxRunCommandOptions {
 	background?: boolean;
 }
 
+/**
+ * Options for {@link RunnerSandbox.streamCommand}. Extends the one-shot
+ * {@link SandboxRunCommandOptions} with chunk callbacks that fire as bytes
+ * arrive from the running process. The returned {@link CommandExecutionResult}
+ * still contains the full buffered output for symmetry with `runCommand`.
+ */
+export interface SandboxStreamCommandOptions extends SandboxRunCommandOptions {
+	/** Invoked with each stdout chunk as it arrives. */
+	onStdout?: (chunk: string) => void;
+	/** Invoked with each stderr chunk as it arrives. */
+	onStderr?: (chunk: string) => void;
+	/** Abort the underlying process when this signal aborts. */
+	signal?: AbortSignal;
+	/**
+	 * Optional async iterable of chunks to feed into the process's stdin while
+	 * it runs. Each yielded chunk is delivered to the running command live —
+	 * local providers write to `child.stdin`; Daytona uses
+	 * `sendSessionCommandInput`. The stream is closed (stdin EOF) when the
+	 * iterable completes.
+	 */
+	input?: AsyncIterable<string>;
+}
+
 export interface RunnerSandboxCapabilities {
 	filesystem: boolean;
 	runCommand: boolean;
@@ -191,6 +222,16 @@ export interface RunnerSandbox {
 	runCommand(
 		command: string,
 		options?: SandboxRunCommandOptions,
+	): Promise<CommandExecutionResult>;
+	/**
+	 * Run a command and stream stdout/stderr chunks through callbacks as they
+	 * arrive. Only available when {@link RunnerSandboxCapabilities.streamingProcess}
+	 * is `true`. Providers that cannot stream do not implement this method; check
+	 * the capability flag before calling.
+	 */
+	streamCommand?(
+		command: string,
+		options?: SandboxStreamCommandOptions,
 	): Promise<CommandExecutionResult>;
 	destroy(): Promise<void>;
 }

@@ -18,6 +18,7 @@ import type {
 	SandboxFilesystem,
 	SandboxProvider,
 	SandboxRunCommandOptions,
+	SandboxStreamCommandOptions,
 } from "../types.js";
 
 export const UNSUPPORTED_STREAMING_PROCESS_REASON =
@@ -27,6 +28,15 @@ export const DEFAULT_RUNNER_SANDBOX_CAPABILITIES: RunnerSandboxCapabilities = {
 	filesystem: true,
 	runCommand: true,
 	streamingProcess: false,
+};
+
+/**
+ * Local execution is always stream-capable via Node's child_process.spawn.
+ */
+export const LOCAL_RUNNER_SANDBOX_CAPABILITIES: RunnerSandboxCapabilities = {
+	filesystem: true,
+	runCommand: true,
+	streamingProcess: true,
 };
 
 export interface LocalSandboxProviderOptions {
@@ -44,7 +54,7 @@ export class LocalSandboxProvider implements SandboxProvider {
 			options.workingDirectory ?? process.cwd(),
 		);
 		this.capabilities =
-			options.capabilities ?? DEFAULT_RUNNER_SANDBOX_CAPABILITIES;
+			options.capabilities ?? LOCAL_RUNNER_SANDBOX_CAPABILITIES;
 	}
 
 	async create(config: RuntimeSandboxConfig = { provider: "local" }) {
@@ -85,6 +95,18 @@ export class LocalRunnerSandbox implements RunnerSandbox {
 		options: SandboxRunCommandOptions = {},
 	): Promise<CommandExecutionResult> {
 		return runLocalCommand(command, this.workingDirectory, options);
+	}
+
+	async streamCommand(
+		command: string,
+		options: SandboxStreamCommandOptions = {},
+	): Promise<CommandExecutionResult> {
+		return runLocalCommand(command, this.workingDirectory, options, {
+			onStdout: options.onStdout,
+			onStderr: options.onStderr,
+			signal: options.signal,
+			input: options.input,
+		});
 	}
 
 	async destroy() {
@@ -143,10 +165,18 @@ export class LocalSandboxFilesystem implements SandboxFilesystem {
 	}
 }
 
+interface LocalStreamHooks {
+	onStdout?: (chunk: string) => void;
+	onStderr?: (chunk: string) => void;
+	signal?: AbortSignal;
+	input?: AsyncIterable<string>;
+}
+
 function runLocalCommand(
 	command: string,
 	workingDirectory: string,
 	options: SandboxRunCommandOptions,
+	stream: LocalStreamHooks = {},
 ): Promise<CommandExecutionResult> {
 	if (options.background) {
 		return Promise.reject(
@@ -158,19 +188,26 @@ function runLocalCommand(
 
 	return new Promise((resolveCommand, reject) => {
 		const startedAt = Date.now();
+		// We always pipe stdout/stderr so we can capture + stream; stdin is
+		// only piped when the caller supplies an input iterable. Either way,
+		// child.stdout/stderr are guaranteed non-null below (asserted).
+		const stdinMode: "ignore" | "pipe" = stream.input ? "pipe" : "ignore";
 		const child = spawn(command, {
 			cwd: options.cwd
 				? resolveCommandCwd(workingDirectory, options.cwd)
 				: workingDirectory,
 			env: { ...process.env, ...options.env },
 			shell: true,
-			stdio: ["ignore", "pipe", "pipe"],
+			stdio: [stdinMode, "pipe", "pipe"],
 		});
+		const childStdout = child.stdout!;
+		const childStderr = child.stderr!;
 
 		let settled = false;
 		let stdout = "";
 		let stderr = "";
 		let timeout: NodeJS.Timeout | undefined;
+		let inputDrainer: Promise<void> | undefined;
 
 		if (options.timeout !== undefined) {
 			timeout = setTimeout(() => {
@@ -178,16 +215,66 @@ function runLocalCommand(
 			}, options.timeout);
 		}
 
-		child.stdout.setEncoding("utf8");
-		child.stderr.setEncoding("utf8");
-		child.stdout.on("data", (chunk: string) => {
+		const onAbort = () => {
+			child.kill("SIGTERM");
+		};
+		if (stream.signal) {
+			if (stream.signal.aborted) {
+				child.kill("SIGTERM");
+			} else {
+				stream.signal.addEventListener("abort", onAbort, { once: true });
+			}
+		}
+
+		if (stream.input && child.stdin) {
+			const stdin = child.stdin;
+			const inputIterable = stream.input;
+			inputDrainer = (async () => {
+				try {
+					for await (const chunk of inputIterable) {
+						if (stream.signal?.aborted) return;
+						if (!stdin.writable) return;
+						stdin.write(chunk);
+					}
+				} catch {
+					// Iterable errors close stdin below.
+				} finally {
+					try {
+						stdin.end();
+					} catch {
+						// stdin may already be closed by the process exiting.
+					}
+				}
+			})();
+			// stdin errors should not crash the run.
+			stdin.on("error", () => {});
+		}
+
+		childStdout.setEncoding("utf8");
+		childStderr.setEncoding("utf8");
+		childStdout.on("data", (chunk: string) => {
 			stdout += chunk;
+			if (stream.onStdout) {
+				try {
+					stream.onStdout(chunk);
+				} catch {
+					// Caller-supplied callbacks must not break the run; swallow.
+				}
+			}
 		});
-		child.stderr.on("data", (chunk: string) => {
+		childStderr.on("data", (chunk: string) => {
 			stderr += chunk;
+			if (stream.onStderr) {
+				try {
+					stream.onStderr(chunk);
+				} catch {
+					// Caller-supplied callbacks must not break the run; swallow.
+				}
+			}
 		});
 		child.on("error", (error) => {
 			if (timeout) clearTimeout(timeout);
+			stream.signal?.removeEventListener("abort", onAbort);
 			if (!settled) {
 				settled = true;
 				reject(error);
@@ -195,8 +282,15 @@ function runLocalCommand(
 		});
 		child.on("close", (exitCode) => {
 			if (timeout) clearTimeout(timeout);
+			stream.signal?.removeEventListener("abort", onAbort);
 			if (!settled) {
 				settled = true;
+				// Resolve as soon as the child exits. The input drainer (if any)
+				// is intentionally orphaned — the caller owns the input
+				// iterable's lifetime and closes it after the command returns.
+				// Awaiting it here would deadlock when the iterable outlives
+				// the process.
+				void inputDrainer;
 				resolveCommand({
 					stdout,
 					stderr,

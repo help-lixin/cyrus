@@ -114,4 +114,5 @@ export const CreateAgentSessionConfigSchema = z.object({
 	sandbox: RuntimeSandboxConfigSchema.optional(),
 	networkEgress: RuntimeNetworkEgressConfigSchema.optional(),
 	metadata: z.record(z.string(), z.unknown()).optional(),
+	interactiveInput: z.boolean().optional(),
 });

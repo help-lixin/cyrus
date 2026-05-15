@@ -6,6 +6,7 @@ import type {
 	RunnerSandboxCapabilities,
 	SandboxFilesystem,
 	SandboxProvider,
+	SandboxStreamCommandOptions,
 } from "../src/types.js";
 
 describe("AgentRuntime", () => {
@@ -115,6 +116,166 @@ describe("AgentRuntime", () => {
 		]);
 	});
 
+	it("prefers streamCommand and emits transcript events live, line-by-line", async () => {
+		// Three Codex events delivered as separate chunks with delays — proves
+		// the session parses each line as it arrives, not after the command exits.
+		const streamingSandbox = new StreamingFakeSandbox([
+			{
+				delayMs: 0,
+				stdout: `${JSON.stringify({
+					type: "item.started",
+					item: { type: "thought", text: "starting" },
+				})}\n`,
+			},
+			{
+				delayMs: 80,
+				stdout: `${JSON.stringify({
+					type: "item.completed",
+					item: { type: "agent_message", text: "midway" },
+				})}\n`,
+			},
+			{
+				delayMs: 80,
+				stdout: `${JSON.stringify({
+					type: "item.completed",
+					item: { type: "agent_message", text: "done" },
+				})}\n`,
+			},
+		]);
+
+		const arrivals: Array<{ kind: string; elapsedMs: number }> = [];
+		const startedAt = Date.now();
+		const session = await createAgentSession(
+			{
+				sessionId: "session-stream",
+				harness: "codex",
+				userPrompt: "Do it",
+			},
+			{
+				sandboxProviders: { local: new FakeSandboxProvider(streamingSandbox) },
+				callbacks: {
+					onTranscriptEvent(event) {
+						arrivals.push({
+							kind: event.kind,
+							elapsedMs: Date.now() - startedAt,
+						});
+					},
+				},
+			},
+		);
+
+		const result = await session.start();
+
+		expect(streamingSandbox.streamCalls).toBe(1);
+		expect(streamingSandbox.runCalls).toBe(0);
+		expect(result.success).toBe(true);
+		expect(result.result).toBe("done");
+		expect(arrivals.map((a) => a.kind)).toEqual([
+			"item.started",
+			"item.completed",
+			"item.completed",
+		]);
+		// The first event must arrive before the command exits — that's the
+		// "live" part. Each scheduled chunk is 80ms apart so the third event
+		// lands at least ~160ms after the first.
+		const firstToLast = arrivals[2]!.elapsedMs - arrivals[0]!.elapsedMs;
+		expect(firstToLast).toBeGreaterThanOrEqual(100);
+	});
+
+	it("falls back to runCommand when streamingProcess capability is false", async () => {
+		const sandbox = new FakeSandbox(
+			JSON.stringify({
+				type: "item.completed",
+				item: { type: "agent_message", text: "buffered" },
+			}),
+		);
+		const session = await createAgentSession(
+			{
+				sessionId: "session-buffered",
+				harness: "codex",
+				userPrompt: "fallback",
+			},
+			{
+				sandboxProviders: { local: new FakeSandboxProvider(sandbox) },
+			},
+		);
+		const result = await session.start();
+		expect(result.success).toBe(true);
+		expect(result.result).toBe("buffered");
+		// Non-streaming sandboxes still get the harness command through runCommand.
+		expect(sandbox.commands).toHaveLength(1);
+	});
+
+	it("does NOT pipe stdin when interactiveInput is false (default)", async () => {
+		// Reproduces the codex-hang scenario: many one-shot CLIs block on a
+		// piped-but-never-closed stdin. The session must default to NOT
+		// attaching an input iterable.
+		const streamingSandbox = new StreamingFakeSandbox([
+			{
+				delayMs: 0,
+				stdout: `${JSON.stringify({
+					type: "item.completed",
+					item: { type: "agent_message", text: "ok" },
+				})}\n`,
+			},
+		]);
+		const session = await createAgentSession(
+			{
+				sessionId: "session-no-stdin",
+				harness: "codex",
+				userPrompt: "no stdin please",
+			},
+			{
+				sandboxProviders: { local: new FakeSandboxProvider(streamingSandbox) },
+			},
+		);
+		// Push messages before start — under no-pipe contract these stay in
+		// the queue and never reach the fake's stdinChunks.
+		await session.addMessage("queued-only");
+		const result = await session.start();
+		expect(result.success).toBe(true);
+		expect(streamingSandbox.stdinChunks).toEqual([]);
+		expect(session.getQueuedMessages()).toEqual(["queued-only"]);
+	});
+
+	it("routes addMessage into the running process's stdin while streaming", async () => {
+		const streamingSandbox = new StreamingFakeSandbox([
+			{
+				delayMs: 30,
+				stdout: `${JSON.stringify({
+					type: "item.completed",
+					item: { type: "agent_message", text: "ack" },
+				})}\n`,
+			},
+		]);
+
+		const session = await createAgentSession(
+			{
+				sessionId: "session-stdin",
+				harness: "codex",
+				userPrompt: "open a stream",
+				interactiveInput: true,
+			},
+			{
+				sandboxProviders: { local: new FakeSandboxProvider(streamingSandbox) },
+			},
+		);
+
+		// Kick the session, then push messages while it's streaming. Capture
+		// what reaches the fake's stdin in real time.
+		const sessionPromise = session.start();
+		// Give the sandbox a moment to begin reading its input iterable.
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		await session.addMessage("hello");
+		await session.addMessage("world");
+
+		const result = await sessionPromise;
+		expect(result.success).toBe(true);
+		// Messages should have been delivered to the fake's stdin as
+		// newline-terminated wire lines, ordered.
+		expect(streamingSandbox.stdinChunks).toEqual(["hello\n", "world\n"]);
+	});
+
 	it("materializes sensitive files before setup without exposing contents", async () => {
 		const sandbox = new FakeSandbox(
 			JSON.stringify({
@@ -171,6 +332,91 @@ class FakeSandboxProvider implements SandboxProvider {
 	async create(): Promise<RunnerSandbox> {
 		return this.sandbox;
 	}
+}
+
+interface ScheduledChunk {
+	delayMs: number;
+	stdout?: string;
+	stderr?: string;
+}
+
+class StreamingFakeSandbox implements RunnerSandbox {
+	readonly sandboxId = "fake-stream";
+	readonly provider = "local";
+	readonly capabilities: RunnerSandboxCapabilities = {
+		filesystem: true,
+		runCommand: true,
+		streamingProcess: true,
+	};
+	readonly filesystem: SandboxFilesystem = {
+		async readFile() {
+			return "";
+		},
+		async writeFile() {},
+		async readdir() {
+			return [];
+		},
+		async mkdir() {},
+		async exists() {
+			return true;
+		},
+		async remove() {},
+	};
+	readonly stdinChunks: string[] = [];
+	streamCalls = 0;
+	runCalls = 0;
+
+	constructor(private readonly schedule: readonly ScheduledChunk[]) {}
+
+	async runCommand(): Promise<CommandExecutionResult> {
+		this.runCalls += 1;
+		return { stdout: "", stderr: "", exitCode: 0, durationMs: 0 };
+	}
+
+	async streamCommand(
+		_command: string,
+		options: SandboxStreamCommandOptions = {},
+	): Promise<CommandExecutionResult> {
+		this.streamCalls += 1;
+		const startedAt = Date.now();
+
+		// Drain the input iterable concurrently — fire-and-forget; the caller
+		// owns the iterable's lifetime and closes it after streamCommand
+		// returns. Mirrors the local + Daytona contract.
+		const inputDrainer = options.input
+			? (async () => {
+					for await (const chunk of options.input!) {
+						this.stdinChunks.push(chunk);
+					}
+				})()
+			: undefined;
+		inputDrainer?.catch(() => {});
+
+		let stdoutBuf = "";
+		let stderrBuf = "";
+		for (const event of this.schedule) {
+			await new Promise((resolve) => setTimeout(resolve, event.delayMs));
+			if (event.stdout) {
+				stdoutBuf += event.stdout;
+				options.onStdout?.(event.stdout);
+			}
+			if (event.stderr) {
+				stderrBuf += event.stderr;
+				options.onStderr?.(event.stderr);
+			}
+		}
+		// Give the input drainer a tick to pick up any messages pushed
+		// during the schedule before we return.
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		return {
+			stdout: stdoutBuf,
+			stderr: stderrBuf,
+			exitCode: 0,
+			durationMs: Date.now() - startedAt,
+		};
+	}
+
+	async destroy(): Promise<void> {}
 }
 
 class FakeSandbox implements RunnerSandbox {

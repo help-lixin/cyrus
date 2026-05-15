@@ -7,8 +7,22 @@ import type {
 	SandboxFilesystem,
 	SandboxProvider,
 	SandboxRunCommandOptions,
+	SandboxStreamCommandOptions,
 } from "../types.js";
 import { DEFAULT_RUNNER_SANDBOX_CAPABILITIES } from "./local.js";
+import {
+	BUILT_IN_NATIVE_STREAM_ADAPTERS,
+	type NativeStreamAdapter,
+	resolveNativeStreamAdapter,
+} from "./native-stream-adapters/index.js";
+
+// Re-export Daytona shape types so existing callers importing them from this
+// module continue to work after the adapter refactor.
+export {
+	type DaytonaNativeSandboxShape,
+	type DaytonaProcessShape,
+	hasDaytonaProcessShape,
+} from "./native-stream-adapters/daytona.js";
 
 export interface ComputeSdkFilesystemLike {
 	readFile?(path: string): Promise<string>;
@@ -36,6 +50,14 @@ export interface ComputeSdkSandboxLike {
 		command: string,
 		options?: SandboxRunCommandOptions,
 	): Promise<Partial<CommandExecutionResult> | string>;
+	/**
+	 * ComputeSDK's `ProviderSandbox.getInstance()` escape hatch — returns the
+	 * native provider sandbox (e.g. @daytonaio/sdk Sandbox). Used by
+	 * {@link ComputeSdkRunnerSandbox.streamCommand} to access provider-specific
+	 * streaming primitives that ComputeSDK's universal `runCommand` cannot
+	 * expose.
+	 */
+	getInstance?(): unknown;
 	destroy?(): Promise<void>;
 	dispose?(): Promise<void>;
 }
@@ -50,6 +72,16 @@ export interface ComputeSdkLike {
 export interface ComputeSdkSandboxProviderOptions {
 	compute: ComputeSdkLike;
 	capabilities?: RunnerSandboxCapabilities;
+	/**
+	 * User-supplied native-streaming adapters. Tried after the built-in
+	 * adapters (currently Daytona only). Use this to add streaming support
+	 * for ComputeSDK providers we don't ship a built-in for, e.g. E2B,
+	 * Vercel, Blaxel, Modal, Railway, Runloop, Cloudflare, Codesandbox.
+	 *
+	 * Each adapter probes `ProviderSandbox.getInstance()` for a recognized
+	 * native shape (see {@link NativeStreamAdapter}).
+	 */
+	nativeStreamAdapters?: readonly NativeStreamAdapter[];
 }
 
 export class ComputeSdkSandboxProvider implements SandboxProvider {
@@ -66,6 +98,7 @@ export class ComputeSdkSandboxProvider implements SandboxProvider {
 			sandbox,
 			this.options.capabilities ?? DEFAULT_RUNNER_SANDBOX_CAPABILITIES,
 			config,
+			this.options.nativeStreamAdapters,
 		);
 	}
 
@@ -92,12 +125,16 @@ export class ComputeSdkRunnerSandbox implements RunnerSandbox {
 	readonly sandboxId: string;
 	readonly provider: string;
 	readonly workingDirectory?: string;
+	readonly capabilities: RunnerSandboxCapabilities;
 	readonly filesystem: SandboxFilesystem;
+	private readonly streamAdapter?: NativeStreamAdapter;
+	private readonly nativeInstance: unknown;
 
 	constructor(
 		private readonly sandbox: ComputeSdkSandboxLike,
-		readonly capabilities: RunnerSandboxCapabilities,
+		capabilities: RunnerSandboxCapabilities,
 		config: RuntimeSandboxConfig,
+		extraStreamAdapters?: readonly NativeStreamAdapter[],
 	) {
 		this.sandboxId = sandbox.sandboxId ?? sandbox.id ?? config.id ?? "compute";
 		this.provider = sandbox.provider ?? config.provider;
@@ -109,6 +146,20 @@ export class ComputeSdkRunnerSandbox implements RunnerSandbox {
 			);
 		}
 		this.filesystem = new ComputeSdkFilesystem(filesystem);
+
+		// Probe the ComputeSDK escape hatch for a native sandbox a registered
+		// adapter can drive. Today's built-ins recognize Daytona; users can
+		// extend by passing extraStreamAdapters.
+		this.nativeInstance = sandbox.getInstance?.();
+		this.streamAdapter = resolveNativeStreamAdapter(
+			this.nativeInstance,
+			extraStreamAdapters,
+		);
+		this.capabilities = {
+			...capabilities,
+			streamingProcess:
+				capabilities.streamingProcess || Boolean(this.streamAdapter),
+		};
 	}
 
 	async runCommand(
@@ -134,6 +185,28 @@ export class ComputeSdkRunnerSandbox implements RunnerSandbox {
 			exitCode: result.exitCode ?? 0,
 			durationMs: result.durationMs ?? Date.now() - startedAt,
 		};
+	}
+
+	async streamCommand(
+		command: string,
+		options: SandboxStreamCommandOptions = {},
+	): Promise<CommandExecutionResult> {
+		if (!this.streamAdapter) {
+			const builtIns = BUILT_IN_NATIVE_STREAM_ADAPTERS.map((a) => a.name).join(
+				", ",
+			);
+			throw new Error(
+				`ComputeSDK sandbox does not support streaming for provider "${this.provider}". ` +
+					`No registered NativeStreamAdapter detected a streaming-capable native instance. ` +
+					`Built-in adapters: ${builtIns}. Add support via ` +
+					`ComputeSdkSandboxProviderOptions.nativeStreamAdapters.`,
+			);
+		}
+		return this.streamAdapter.streamCommand(
+			this.nativeInstance,
+			command,
+			options,
+		);
 	}
 
 	async destroy(): Promise<void> {

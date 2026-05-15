@@ -49,6 +49,33 @@ class AsyncEventBuffer<T> implements AsyncIterable<T> {
 	}
 }
 
+/**
+ * Splits incoming chunks into newline-terminated lines for harness adapters
+ * to parse. Carries a partial-line buffer between chunks so an event that
+ * arrives split across multiple TCP packets is still parsed as one line.
+ */
+class LineSplitter {
+	private buffer = "";
+
+	push(chunk: string, onLine: (line: string) => void): void {
+		this.buffer += chunk;
+		let nl = this.buffer.indexOf("\n");
+		while (nl !== -1) {
+			const line = this.buffer.slice(0, nl);
+			this.buffer = this.buffer.slice(nl + 1);
+			const stripped = line.endsWith("\r") ? line.slice(0, -1) : line;
+			if (stripped.trim()) onLine(stripped);
+			nl = this.buffer.indexOf("\n");
+		}
+	}
+
+	flush(onLine: (line: string) => void): void {
+		const remaining = this.buffer;
+		this.buffer = "";
+		if (remaining.trim()) onLine(remaining);
+	}
+}
+
 export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 	readonly sessionId: string;
 	readonly harness: NormalizedAgentSessionConfig["harness"]["kind"];
@@ -57,6 +84,9 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 	private readonly eventBuffer = new AsyncEventBuffer<TranscriptEvent>();
 	private readonly observedEvents: TranscriptEvent[] = [];
 	private readonly queuedMessages: string[] = [];
+	private readonly inputBuffer = new AsyncEventBuffer<string>();
+	private readonly abortController = new AbortController();
+	private streamingActive = false;
 	private stopped = false;
 	private started = false;
 
@@ -79,36 +109,103 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 		this.started = true;
 
 		const command = this.adapter.buildCommand(this.config);
+		const fullCommand = [command.command, ...command.args.map(shellQuote)].join(
+			" ",
+		);
+		const env = {
+			...this.config.env,
+			...command.env,
+			...this.materializeSecrets(),
+		};
+		const cwd = this.config.sandbox.workingDirectory;
 		const startedAt = Date.now();
+
 		try {
 			await this.materializeFiles();
 			await this.runSetupCommands();
-			const result = await this.sandbox.runCommand(
-				[command.command, ...command.args.map(shellQuote)].join(" "),
-				{
-					cwd: this.config.sandbox.workingDirectory,
-					env: {
-						...this.config.env,
-						...command.env,
-						...this.materializeSecrets(),
-					},
-				},
-			);
 
-			await this.parseOutput(result.stdout, "stdout");
-			await this.parseOutput(result.stderr, "stderr");
+			const canStream =
+				typeof this.sandbox.streamCommand === "function" &&
+				this.sandbox.capabilities.streamingProcess === true;
+
+			let exitCode: number;
+			if (canStream) {
+				this.streamingActive = true;
+				const stdoutSplitter = new LineSplitter();
+				const stderrSplitter = new LineSplitter();
+				// Only pipe stdin when the caller opts in to interactive input.
+				// Most one-shot harness CLIs (e.g. `codex exec`) block forever
+				// on a piped-but-never-closed stdin.
+				const inputIterable = this.config.interactiveInput
+					? this.inputBuffer
+					: undefined;
+				const result = await this.sandbox.streamCommand!(fullCommand, {
+					cwd,
+					env,
+					signal: this.abortController.signal,
+					input: inputIterable,
+					onStdout: (chunk) => {
+						stdoutSplitter.push(chunk, (line) => {
+							const event = this.adapter.parseStdoutLine(line, {
+								sessionId: this.sessionId,
+								harness: this.harness,
+							});
+							if (event) {
+								void this.emitEvent(event);
+							}
+						});
+					},
+					onStderr: (chunk) => {
+						stderrSplitter.push(chunk, (line) => {
+							const event = this.adapter.parseStderrLine?.(line, {
+								sessionId: this.sessionId,
+								harness: this.harness,
+							});
+							if (event) {
+								void this.emitEvent(event);
+							}
+						});
+					},
+				});
+				// Flush any trailing partial lines the process did not terminate.
+				stdoutSplitter.flush((line) => {
+					const event = this.adapter.parseStdoutLine(line, {
+						sessionId: this.sessionId,
+						harness: this.harness,
+					});
+					if (event) void this.emitEvent(event);
+				});
+				stderrSplitter.flush((line) => {
+					const event = this.adapter.parseStderrLine?.(line, {
+						sessionId: this.sessionId,
+						harness: this.harness,
+					});
+					if (event) void this.emitEvent(event);
+				});
+				exitCode = result.exitCode;
+			} else {
+				const result = await this.sandbox.runCommand(fullCommand, { cwd, env });
+				await this.parseBufferedOutput(result.stdout, "stdout");
+				await this.parseBufferedOutput(result.stderr, "stderr");
+				exitCode = result.exitCode;
+			}
+
+			this.streamingActive = false;
+			this.inputBuffer.close();
 
 			const runtimeResult: AgentSessionResult = {
 				sessionId: this.sessionId,
 				harness: this.harness,
-				success: result.exitCode === 0 && !this.stopped,
-				exitCode: result.exitCode,
+				success: exitCode === 0 && !this.stopped,
+				exitCode,
 				result: this.adapter.extractResult?.(this.observedEvents),
 				events: [...this.observedEvents],
 			};
 			this.eventBuffer.close();
 			return runtimeResult;
 		} catch (error) {
+			this.streamingActive = false;
+			this.inputBuffer.close();
 			const err = error instanceof Error ? error : new Error(String(error));
 			const failedEvent = this.createEvent("error", {
 				message: err.message,
@@ -129,6 +226,17 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 	async addMessage(message: string): Promise<void> {
 		this.queuedMessages.push(message);
 		await this.emitEvent(this.createEvent("message.queued", { message }));
+		// If the harness is actively streaming AND the session was started in
+		// interactive-input mode, route this message into the running process's
+		// stdin so it can react live. Otherwise the queue remains observable
+		// via getQueuedMessages() for callers that want to drain it themselves
+		// before/after start().
+		if (this.streamingActive && this.config.interactiveInput) {
+			// Newline-terminate so line-oriented consumers (most agent CLIs in
+			// stream-json mode) see one input per line.
+			const wire = message.endsWith("\n") ? message : `${message}\n`;
+			this.inputBuffer.push(wire);
+		}
 	}
 
 	async interrupt(reason?: string): Promise<void> {
@@ -138,6 +246,8 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 	async stop(reason?: string): Promise<void> {
 		this.stopped = true;
 		await this.emitEvent(this.createEvent("stop.requested", { reason }));
+		this.abortController.abort();
+		this.inputBuffer.close();
 		await this.sandbox.destroy();
 		this.eventBuffer.close();
 	}
@@ -146,7 +256,7 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 		return this.queuedMessages;
 	}
 
-	private async parseOutput(
+	private async parseBufferedOutput(
 		output: string,
 		stream: "stdout" | "stderr",
 	): Promise<void> {
