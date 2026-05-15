@@ -1,5 +1,10 @@
 import { EventEmitter } from "node:events";
 import { dirname } from "node:path";
+import {
+	materializeFolderIntoSandbox,
+	materializeRepositoryIntoSandbox,
+	syncFolderBackToHost,
+} from "./materializers/index.js";
 import type {
 	AgentSession,
 	AgentSessionResult,
@@ -7,6 +12,7 @@ import type {
 	NormalizedAgentSessionConfig,
 	RunnerSandbox,
 	RuntimeCallbacks,
+	RuntimeFolderConfig,
 	TranscriptEvent,
 } from "./types.js";
 
@@ -89,6 +95,14 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 	private streamingActive = false;
 	private stopped = false;
 	private started = false;
+	/**
+	 * Per-readwrite-folder ledger of files we materialized in, so sync-back
+	 * can re-read them even if the agent didn't touch them.
+	 */
+	private readonly folderLedger = new Map<
+		RuntimeFolderConfig,
+		readonly string[]
+	>();
 
 	constructor(
 		private readonly config: NormalizedAgentSessionConfig,
@@ -122,6 +136,8 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 
 		try {
 			await this.materializeFiles();
+			await this.materializeFolders();
+			await this.materializeRepositories();
 			await this.runSetupCommands();
 
 			const canStream =
@@ -192,6 +208,8 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 
 			this.streamingActive = false;
 			this.inputBuffer.close();
+
+			await this.syncFoldersBack();
 
 			const runtimeResult: AgentSessionResult = {
 				sessionId: this.sessionId,
@@ -314,6 +332,132 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 					content: file.sensitive ? "[redacted]" : file.content,
 				}),
 			);
+		}
+	}
+
+	private async materializeFolders(): Promise<void> {
+		for (const folder of this.config.folders ?? []) {
+			const access = folder.access ?? "read";
+			await this.emitEvent(
+				this.createEvent("folder.materialize.started", {
+					source: folder.source,
+					mountPath: folder.mountPath,
+					access,
+					exclude: folder.exclude,
+				}),
+			);
+			try {
+				const result = await materializeFolderIntoSandbox(folder, this.sandbox);
+				if (access === "readwrite") {
+					this.folderLedger.set(folder, result.filesWritten);
+				}
+				await this.emitEvent(
+					this.createEvent("folder.materialize.completed", {
+						source: folder.source,
+						mountPath: folder.mountPath,
+						access,
+						filesWritten: result.filesWritten.length,
+						bytes: result.bytes,
+					}),
+				);
+			} catch (error) {
+				const err = error instanceof Error ? error : new Error(String(error));
+				await this.emitEvent(
+					this.createEvent("folder.materialize.failed", {
+						source: folder.source,
+						mountPath: folder.mountPath,
+						access,
+						error: err.message,
+					}),
+				);
+				throw err;
+			}
+		}
+	}
+
+	private async materializeRepositories(): Promise<void> {
+		const env = {
+			...this.config.env,
+			...this.materializeSecrets(),
+		};
+		for (const repo of this.config.repositories ?? []) {
+			const access = repo.access ?? "readwrite";
+			await this.emitEvent(
+				this.createEvent("repository.materialize.started", {
+					source: repo.source,
+					mountPath: repo.mountPath,
+					branch: repo.branch,
+					access,
+					depth: repo.depth,
+				}),
+			);
+			try {
+				const result = await materializeRepositoryIntoSandbox(
+					repo,
+					this.sandbox,
+					env,
+				);
+				await this.emitEvent(
+					this.createEvent("repository.materialize.completed", {
+						source: repo.source,
+						mountPath: repo.mountPath,
+						branch: repo.branch,
+						access,
+						depth: result.depth,
+						resolvedSource: result.resolvedSource,
+					}),
+				);
+			} catch (error) {
+				const err = error instanceof Error ? error : new Error(String(error));
+				await this.emitEvent(
+					this.createEvent("repository.materialize.failed", {
+						source: repo.source,
+						mountPath: repo.mountPath,
+						branch: repo.branch,
+						access,
+						error: err.message,
+					}),
+				);
+				throw err;
+			}
+		}
+	}
+
+	private async syncFoldersBack(): Promise<void> {
+		for (const [folder, originalFiles] of this.folderLedger.entries()) {
+			await this.emitEvent(
+				this.createEvent("folder.syncback.started", {
+					source: folder.source,
+					mountPath: folder.mountPath,
+				}),
+			);
+			try {
+				const result = await syncFolderBackToHost(
+					folder,
+					this.sandbox,
+					originalFiles,
+				);
+				await this.emitEvent(
+					this.createEvent("folder.syncback.completed", {
+						source: folder.source,
+						mountPath: folder.mountPath,
+						filesWritten: result.filesWritten.length,
+						bytes: result.bytes,
+					}),
+				);
+			} catch (error) {
+				const err = error instanceof Error ? error : new Error(String(error));
+				await this.emitEvent(
+					this.createEvent("folder.syncback.failed", {
+						source: folder.source,
+						mountPath: folder.mountPath,
+						error: err.message,
+					}),
+				);
+				// Sync-back failures are non-fatal — the agent's work in-sandbox
+				// already completed; we surface the error in the transcript and
+				// keep going.
+			}
 		}
 	}
 

@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createAgentSession, normalizeConfig } from "../src/runtime.js";
 import type {
@@ -274,6 +277,104 @@ describe("AgentRuntime", () => {
 		// Messages should have been delivered to the fake's stdin as
 		// newline-terminated wire lines, ordered.
 		expect(streamingSandbox.stdinChunks).toEqual(["hello\n", "world\n"]);
+	});
+
+	it("materializes folders and syncs read-write edits back to the host", async () => {
+		// End-to-end through createAgentSession with a real local sandbox:
+		// host folder is uploaded, setup commands stand in for an agent's
+		// edits, and syncFoldersBack writes them back to the host. The
+		// harness is set to `true` so the "session" itself is a no-op.
+		const host = await mkdtemp(join(tmpdir(), "agent-runtime-rt-folder-"));
+		const sandboxRoot = await mkdtemp(
+			join(tmpdir(), "agent-runtime-rt-folder-sbx-"),
+		);
+		try {
+			await writeFile(join(host, "input.txt"), "before");
+			const mount = join(sandboxRoot, "work");
+
+			const session = await createAgentSession({
+				sessionId: "session-folder",
+				harness: { kind: "codex", command: "true" },
+				userPrompt: "edit files please",
+				sandbox: { provider: "local", workingDirectory: sandboxRoot },
+				folders: [{ source: host, mountPath: mount, access: "readwrite" }],
+				packages: {
+					// These setup commands stand in for what an agent would do
+					// during the run: edit one file, create another.
+					commands: [
+						`sh -c 'printf after > ${mount}/input.txt'`,
+						`sh -c 'printf created > ${mount}/new.txt'`,
+					],
+				},
+			});
+
+			const result = await session.start();
+			expect(result.success).toBe(true);
+
+			const kinds = result.events.map((e) => e.kind);
+			expect(kinds).toContain("folder.materialize.started");
+			expect(kinds).toContain("folder.materialize.completed");
+			expect(kinds).toContain("folder.syncback.started");
+			expect(kinds).toContain("folder.syncback.completed");
+
+			await expect(readFile(join(host, "input.txt"), "utf8")).resolves.toBe(
+				"after",
+			);
+			await expect(readFile(join(host, "new.txt"), "utf8")).resolves.toBe(
+				"created",
+			);
+		} finally {
+			await rm(host, { recursive: true, force: true });
+			await rm(sandboxRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("routes repository config through git-clone/checkout commands and emits lifecycle events", async () => {
+		// Session-level wiring test: verify that declaring `repositories`
+		// causes the runtime to invoke `git clone` (and `git checkout` when a
+		// branch is set) on the sandbox, before the harness command runs, with
+		// the right env. Real git behavior is covered by materializers.test.ts.
+		const sandbox = new FakeSandbox(
+			JSON.stringify({
+				type: "item.completed",
+				item: { type: "agent_message", text: "cloned" },
+			}),
+		);
+		const session = await createAgentSession(
+			{
+				sessionId: "session-repo",
+				harness: "codex",
+				userPrompt: "clone please",
+				repositories: [
+					{
+						source: "/tmp/upstream",
+						mountPath: "/work/repo",
+						branch: "feature",
+						access: "read",
+					},
+				],
+			},
+			{ sandboxProviders: { local: new FakeSandboxProvider(sandbox) } },
+		);
+
+		const result = await session.start();
+		expect(result.success).toBe(true);
+
+		const kinds = result.events.map((e) => e.kind);
+		expect(kinds).toContain("repository.materialize.started");
+		expect(kinds).toContain("repository.materialize.completed");
+
+		const commands = sandbox.commands.map((c) => c.command);
+		// Shallow clones (depth=1 because access:"read") steer with --branch
+		// on the clone itself, because a post-clone `git checkout` of a
+		// non-default branch fails when only one branch's history is fetched.
+		expect(commands[0]).toBe(
+			"git clone --depth 1 --branch feature file:///tmp/upstream /work/repo",
+		);
+		// Harness command runs after the repo command.
+		expect(commands.at(-1)).toBe(
+			"codex exec --json --skip-git-repo-check 'clone please'",
+		);
 	});
 
 	it("materializes sensitive files before setup without exposing contents", async () => {

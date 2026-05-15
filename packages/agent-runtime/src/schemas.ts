@@ -96,6 +96,27 @@ export const CreateAgentSessionConfigSchema = z.object({
 			}),
 		)
 		.optional(),
+	folders: z
+		.array(
+			z.object({
+				source: z.string().min(1),
+				mountPath: z.string().min(1),
+				access: z.enum(["read", "readwrite"]).optional(),
+				exclude: z.array(z.string()).optional(),
+			}),
+		)
+		.optional(),
+	repositories: z
+		.array(
+			z.object({
+				source: z.string().min(1),
+				mountPath: z.string().min(1),
+				branch: z.string().min(1).optional(),
+				access: z.enum(["read", "readwrite"]).optional(),
+				depth: z.number().int().positive().optional(),
+			}),
+		)
+		.optional(),
 	mcps: z.record(z.string(), z.unknown()).optional(),
 	permissions: z
 		.object({

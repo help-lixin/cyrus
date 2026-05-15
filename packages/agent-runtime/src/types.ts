@@ -46,6 +46,71 @@ export interface RuntimeFileConfig {
 	sensitive?: boolean;
 }
 
+/**
+ * Access mode for folders and repositories materialized into the sandbox.
+ * - `"read"`: the runtime makes the contents available; changes inside the
+ *   sandbox are not propagated back to the source.
+ * - `"readwrite"`: the runtime makes the contents available and syncs
+ *   changes inside the sandbox back to the source after the harness
+ *   command completes (folders) or leaves them ready for an explicit push
+ *   (repositories).
+ */
+export type RuntimeAccessMode = "read" | "readwrite";
+
+/**
+ * Materialize a host filesystem folder into the sandbox. For local
+ * sandboxes this is a directory copy; for remote sandboxes (e.g. Daytona)
+ * the runtime walks the host tree and uploads each file via
+ * {@link SandboxFilesystem.writeFile}. With `access: "readwrite"` the
+ * runtime syncs changes from the sandbox back to the host after the
+ * harness command completes — useful for dev loops where the user wants
+ * to see the agent's edits on their disk.
+ *
+ * Conceptually distinct from {@link RuntimeVolumeConfig} (provider-attached
+ * persistent storage) and {@link RuntimeRepositoryConfig} (git-driven
+ * trees with branch awareness).
+ */
+export interface RuntimeFolderConfig {
+	/** Absolute or runtime-relative host path to expose. */
+	source: string;
+	/** Where in the sandbox to materialize the folder contents. */
+	mountPath: string;
+	/** Default: `"read"`. */
+	access?: RuntimeAccessMode;
+	/** Glob patterns (relative to source) to skip during copy/sync. */
+	exclude?: string[];
+}
+
+/**
+ * Materialize a git repository into the sandbox. The runtime runs
+ * `git clone <source> <mountPath>` inside the sandbox (so credentials,
+ * proxies, and CA bundles are inherited from the sandbox env) and, if
+ * `branch` is set, checks out that ref. With `access: "readwrite"` the
+ * working tree is left configured for push; with `"read"` the clone is
+ * shallow by default and push is not expected.
+ */
+export interface RuntimeRepositoryConfig {
+	/**
+	 * Git URL (HTTPS or SSH) or local path. Local paths are cloned via
+	 * `file://` to preserve git semantics rather than naive copy.
+	 */
+	source: string;
+	/** Where in the sandbox to clone the working tree. */
+	mountPath: string;
+	/**
+	 * Optional ref to check out after clone. Branch, tag, or commit SHA.
+	 * Defaults to remote HEAD.
+	 */
+	branch?: string;
+	/** Default: `"readwrite"`. */
+	access?: RuntimeAccessMode;
+	/**
+	 * Optional shallow-clone depth. Defaults to `1` for `access: "read"`
+	 * and unset (full clone) for `access: "readwrite"`.
+	 */
+	depth?: number;
+}
+
 export interface RuntimeVolumeConfig {
 	name: string;
 	mountPath: string;
@@ -97,6 +162,8 @@ export interface CreateAgentSessionConfig {
 	secrets?: Record<string, RuntimeSecret | string>;
 	packages?: RuntimePackageConfig;
 	files?: RuntimeFileConfig[];
+	folders?: RuntimeFolderConfig[];
+	repositories?: RuntimeRepositoryConfig[];
 	mcps?: Record<string, McpServerRuntimeConfig>;
 	permissions?: RuntimePermissionConfig;
 	memory?: RuntimeMemoryConfig;

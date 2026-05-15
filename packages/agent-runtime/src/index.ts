@@ -1,4 +1,5 @@
 export * from "./harnesses/index.js";
+export * from "./materializers/index.js";
 export * from "./runtime.js";
 export * from "./sandbox/index.js";
 export * from "./schemas.js";
