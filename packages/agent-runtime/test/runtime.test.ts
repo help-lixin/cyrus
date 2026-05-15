@@ -377,6 +377,48 @@ describe("AgentRuntime", () => {
 		);
 	});
 
+	it("exposes destroy() on AgentSessionResult that releases the sandbox exactly once", async () => {
+		// Verifies that the ComputeSDK-style destroy escape hatch is reachable
+		// from the result object, that it's idempotent, and that the session's
+		// stop() shares the same one-shot — so callers can call either or both
+		// without double-destroying the underlying sandbox.
+		const sandbox = new FakeSandbox(
+			JSON.stringify({
+				type: "item.completed",
+				item: { type: "agent_message", text: "done" },
+			}),
+		);
+		const session = await createAgentSession(
+			{
+				sessionId: "session-destroy",
+				harness: "codex",
+				userPrompt: "anything",
+			},
+			{ sandboxProviders: { local: new FakeSandboxProvider(sandbox) } },
+		);
+
+		const result = await session.start();
+		expect(result.success).toBe(true);
+		expect(typeof result.destroy).toBe("function");
+
+		// Before destroy: sandbox.destroy has not been called.
+		expect(
+			sandbox.commands.find((c) => c.command === "DESTROY"),
+		).toBeUndefined();
+		expect(sandbox.destroyed).toBe(0);
+
+		await result.destroy();
+		expect(sandbox.destroyed).toBe(1);
+
+		// Idempotent — calling again must not invoke sandbox.destroy a second time.
+		await result.destroy();
+		expect(sandbox.destroyed).toBe(1);
+
+		// And stop() shares the same one-shot, so it doesn't double-destroy either.
+		await session.stop();
+		expect(sandbox.destroyed).toBe(1);
+	});
+
 	it("materializes sensitive files before setup without exposing contents", async () => {
 		const sandbox = new FakeSandbox(
 			JSON.stringify({
@@ -553,6 +595,7 @@ class FakeSandbox implements RunnerSandbox {
 		command: string;
 		options: unknown;
 	}> = [];
+	destroyed = 0;
 
 	constructor(private readonly stdout: string) {}
 
@@ -570,6 +613,6 @@ class FakeSandbox implements RunnerSandbox {
 	}
 
 	async destroy(): Promise<void> {
-		return;
+		this.destroyed += 1;
 	}
 }

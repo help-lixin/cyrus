@@ -95,6 +95,8 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 	private streamingActive = false;
 	private stopped = false;
 	private started = false;
+	private sandboxDestroyed = false;
+	private sandboxDestroyPromise?: Promise<void>;
 	/**
 	 * Per-readwrite-folder ledger of files we materialized in, so sync-back
 	 * can re-read them even if the agent didn't touch them.
@@ -218,6 +220,7 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 				exitCode,
 				result: this.adapter.extractResult?.(this.observedEvents),
 				events: [...this.observedEvents],
+				destroy: () => this.destroySandboxOnce(),
 			};
 			this.eventBuffer.close();
 			return runtimeResult;
@@ -237,6 +240,7 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 				success: false,
 				error: err,
 				events: [...this.observedEvents],
+				destroy: () => this.destroySandboxOnce(),
 			};
 		}
 	}
@@ -266,8 +270,30 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 		await this.emitEvent(this.createEvent("stop.requested", { reason }));
 		this.abortController.abort();
 		this.inputBuffer.close();
-		await this.sandbox.destroy();
+		await this.destroySandboxOnce();
 		this.eventBuffer.close();
+	}
+
+	/**
+	 * Idempotent sandbox teardown. Backs both `AgentSession.stop()` and
+	 * the `destroy()` method on returned `AgentSessionResult`s, so callers
+	 * can safely call either or both without double-destroying the
+	 * underlying ComputeSDK / local sandbox.
+	 */
+	private async destroySandboxOnce(): Promise<void> {
+		if (this.sandboxDestroyed) return;
+		if (this.sandboxDestroyPromise) {
+			await this.sandboxDestroyPromise;
+			return;
+		}
+		this.sandboxDestroyPromise = (async () => {
+			try {
+				await this.sandbox.destroy();
+			} finally {
+				this.sandboxDestroyed = true;
+			}
+		})();
+		await this.sandboxDestroyPromise;
 	}
 
 	getQueuedMessages(): readonly string[] {

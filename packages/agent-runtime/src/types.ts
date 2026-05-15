@@ -336,6 +336,15 @@ export interface AgentSessionResult {
 	result?: string;
 	error?: Error;
 	events: TranscriptEvent[];
+	/**
+	 * Release the underlying sandbox. Equates to ComputeSDK's
+	 * `ProviderSandbox.destroy()` for ComputeSDK-backed providers (deletes
+	 * the remote sandbox and releases compute resources); for the local
+	 * provider it is a no-op. Idempotent — safe to call multiple times,
+	 * and safe to call alongside `AgentSession.stop()` (they share the
+	 * same one-shot destroy).
+	 */
+	destroy(): Promise<void>;
 }
 
 export interface NormalizedAgentSessionConfig
