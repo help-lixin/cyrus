@@ -4,6 +4,9 @@ This changelog documents internal development changes, refactors, tooling update
 
 ## [Unreleased]
 
+### Added
+- Added `cyrus-agent-runtime`, a standalone experimental TypeScript package for unified agent session orchestration across harnesses and sandbox providers. It includes normalized session config, transcript envelopes, local and ComputeSDK-backed sandbox abstractions, harness adapters for Claude/Codex/Cursor/Gemini plus provisional PI/OpenCode adapters, and focused tests for config, runtime lifecycle, sandbox execution, and transcript parsing.
+
 ## [0.2.50] - 2026-04-30
 
 ### Added
