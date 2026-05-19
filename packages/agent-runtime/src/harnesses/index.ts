@@ -9,7 +9,6 @@ import { codexHarness } from "./codex.js";
 import { cursorHarness } from "./cursor.js";
 import { geminiHarness } from "./gemini.js";
 import { opencodeHarness } from "./opencode.js";
-import { piHarness } from "./pi.js";
 
 export type {
 	HarnessAdapter,
@@ -23,7 +22,6 @@ export {
 	cursorHarness,
 	geminiHarness,
 	opencodeHarness,
-	piHarness,
 };
 
 export const harnessAdapters: Record<HarnessKind, HarnessAdapter> = {
@@ -31,7 +29,6 @@ export const harnessAdapters: Record<HarnessKind, HarnessAdapter> = {
 	codex: codexHarness,
 	cursor: cursorHarness,
 	gemini: geminiHarness,
-	pi: piHarness,
 	opencode: opencodeHarness,
 };
 

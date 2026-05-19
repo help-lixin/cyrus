@@ -25,7 +25,6 @@ describe("harness adapters", () => {
 			"cursor",
 			"gemini",
 			"opencode",
-			"pi",
 		]);
 	});
 

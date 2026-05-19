@@ -1,10 +1,4 @@
-export type HarnessKind =
-	| "claude"
-	| "codex"
-	| "cursor"
-	| "gemini"
-	| "pi"
-	| "opencode";
+export type HarnessKind = "claude" | "codex" | "cursor" | "gemini" | "opencode";
 
 export type PermissionMode = "default" | "plan" | "ask" | "auto" | "bypass";
 

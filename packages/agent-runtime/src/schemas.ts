@@ -5,7 +5,6 @@ export const HarnessKindSchema = z.enum([
 	"codex",
 	"cursor",
 	"gemini",
-	"pi",
 	"opencode",
 ]);
 
