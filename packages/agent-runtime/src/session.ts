@@ -219,6 +219,7 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 				success: exitCode === 0 && !this.stopped,
 				exitCode,
 				result: this.adapter.extractResult?.(this.observedEvents),
+				harnessSessionId: this.adapter.extractSessionId?.(this.observedEvents),
 				events: [...this.observedEvents],
 				destroy: () => this.destroySandboxOnce(),
 			};
@@ -239,6 +240,7 @@ export class RuntimeAgentSession extends EventEmitter implements AgentSession {
 				harness: this.harness,
 				success: false,
 				error: err,
+				harnessSessionId: this.adapter.extractSessionId?.(this.observedEvents),
 				events: [...this.observedEvents],
 				destroy: () => this.destroySandboxOnce(),
 			};

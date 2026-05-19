@@ -165,6 +165,11 @@ import { RunnerSelectionService } from "./RunnerSelectionService.js";
 import { SharedApplicationServer } from "./SharedApplicationServer.js";
 import { SkillsPluginResolver } from "./SkillsPluginResolver.js";
 import { SlackChatAdapter } from "./SlackChatAdapter.js";
+import {
+	assertSlackDaytonaEnv,
+	resolveSlackDaytonaVolumeId,
+	SlackDaytonaRunner,
+} from "./SlackDaytonaRunner.js";
 import type { IActivitySink } from "./sinks/IActivitySink.js";
 import { LinearActivitySink } from "./sinks/LinearActivitySink.js";
 import { ToolPermissionResolver } from "./ToolPermissionResolver.js";
@@ -785,7 +790,7 @@ export class EdgeWorker extends EventEmitter {
 		// for webhook URL verification to succeed.
 		this.registerGitHubEventTransport();
 		this.registerGitLabEventTransport();
-		this.registerSlackEventTransport();
+		await this.registerSlackEventTransport();
 
 		// 3. Create and register ConfigUpdater (both platforms)
 		this.configUpdater = new ConfigUpdater(
@@ -991,7 +996,7 @@ export class EdgeWorker extends EventEmitter {
 	 * Register the Slack event transport for receiving forwarded Slack webhooks from CYHOST.
 	 * This creates a /slack-webhook endpoint that handles @mention events from Slack.
 	 */
-	private registerSlackEventTransport(): void {
+	private async registerSlackEventTransport(): Promise<void> {
 		// Live provider reads from the repository map on demand — no snapshot needed
 		const chatRepositoryProvider = new LiveChatRepositoryProvider(
 			this.repositories,
@@ -1015,6 +1020,28 @@ export class EdgeWorker extends EventEmitter {
 			);
 		}
 
+		// MVP: every Slack session runs Claude inside a fresh Daytona sandbox
+		// via cyrus-agent-runtime. If creds are missing or the volume can't be
+		// resolved, log loudly and skip Slack registration only — the rest of
+		// EdgeWorker (Linear, GitHub, GitLab) keeps running.
+		let slackDaytonaConfig: Awaited<
+			ReturnType<typeof resolveSlackDaytonaVolumeId>
+		>;
+		try {
+			const slackDaytonaEnv = assertSlackDaytonaEnv();
+			slackDaytonaConfig = await resolveSlackDaytonaVolumeId(slackDaytonaEnv);
+		} catch (error) {
+			this.logger.warn(
+				`Slack→Daytona setup failed; Slack endpoint will NOT be registered. Other transports continue normally. ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			);
+			return;
+		}
+		this.logger.info(
+			`Slack sessions will use Daytona sandbox runtime (volume=${slackDaytonaConfig.volumeName}, id=${slackDaytonaConfig.volumeId})`,
+		);
+
 		this.chatSessionHandler = new ChatSessionHandler(
 			slackAdapter,
 			{
@@ -1022,12 +1049,16 @@ export class EdgeWorker extends EventEmitter {
 				chatRepositoryProvider,
 				runnerConfigBuilder: this.runnerConfigBuilder,
 				createRunner: (config) => {
-					const runnerType = this.runnerSelectionService.getDefaultRunner();
-					return this.createRunnerForType(runnerType, {
-						...config,
-						model: this.getDefaultModelForRunner(runnerType),
-						fallbackModel: this.getDefaultFallbackModelForRunner(runnerType),
-					});
+					return new SlackDaytonaRunner(
+						{
+							...config,
+							model: this.getDefaultModelForRunner("claude") ?? config.model,
+							fallbackModel:
+								this.getDefaultFallbackModelForRunner("claude") ??
+								config.fallbackModel,
+						},
+						slackDaytonaConfig,
+					);
 				},
 				onWebhookStart: () => {
 					this.activeWebhookCount++;

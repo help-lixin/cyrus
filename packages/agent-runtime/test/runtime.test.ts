@@ -507,6 +507,37 @@ describe("AgentRuntime", () => {
 			},
 		]);
 	});
+
+	it("threads resumeHarnessSessionId into claude --resume and surfaces harnessSessionId on the result", async () => {
+		// End-to-end through createAgentSession: caller hands in the prior
+		// harness session id (the AgentSessionManager owns this mapping in
+		// real Cyrus), the Claude adapter adds --resume, and the new id
+		// emitted by the run lands on the result for the caller to persist.
+		const sandbox = new FakeSandbox(
+			JSON.stringify({
+				type: "system",
+				subtype: "init",
+				session_id: "claude-new-uuid",
+			}),
+		);
+		const session = await createAgentSession(
+			{
+				sessionId: "session-resume",
+				harness: "claude",
+				userPrompt: "follow-up",
+				resumeHarnessSessionId: "claude-prior-uuid",
+			},
+			{ sandboxProviders: { local: new FakeSandboxProvider(sandbox) } },
+		);
+
+		const result = await session.start();
+
+		expect(result.success).toBe(true);
+		expect(result.harnessSessionId).toBe("claude-new-uuid");
+		expect(sandbox.commands[0]?.command).toContain(
+			"--resume claude-prior-uuid",
+		);
+	});
 });
 
 class FakeSandboxProvider implements SandboxProvider {
