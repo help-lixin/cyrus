@@ -165,7 +165,7 @@ importers:
       '@computesdk/daytona':
         specifier: ^1.7.26
         version: 1.7.26(ws@8.20.0)
-      '@cyrus/cursor-runner':
+      '@cyrus-ai/cursor-runner':
         specifier: workspace:*
         version: link:../cursor-sdk-runner
       computesdk:

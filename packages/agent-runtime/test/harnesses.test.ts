@@ -105,7 +105,7 @@ describe("harness adapters", () => {
 		]);
 	});
 
-	it("builds a Cursor command via the host-resolved @cyrus/cursor-runner when harness.command is unset", () => {
+	it("builds a Cursor command via the host-resolved @cyrus-ai/cursor-runner when harness.command is unset", () => {
 		const command = buildHarnessInvocation(
 			{
 				...baseConfig,
@@ -117,7 +117,7 @@ describe("harness adapters", () => {
 		);
 
 		// Local-provider path: no `harness.command` override, so the
-		// adapter resolves `@cyrus/cursor-runner` from the host's
+		// adapter resolves `@cyrus-ai/cursor-runner` from the host's
 		// node_modules and spawns `node <resolved-path>`. The exact
 		// filesystem location depends on pnpm/npm linking, so we
 		// assert the entry filename instead of pinning the whole path.

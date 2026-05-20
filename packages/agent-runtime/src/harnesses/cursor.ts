@@ -8,11 +8,11 @@ import type {
 import { createCommand, parseJsonLine, resolveModel } from "./common.js";
 
 /**
- * Host-side fallback path to the `@cyrus/cursor-runner` CLI, resolved
+ * Host-side fallback path to the `@cyrus-ai/cursor-runner` CLI, resolved
  * once at module load via Node's standard module resolution.
  *
  * Used when the caller does NOT supply `harness.command` — i.e. for the
- * local provider, where `@cyrus/cursor-runner` ships under the host's
+ * local provider, where `@cyrus-ai/cursor-runner` ships under the host's
  * `node_modules/` and `createRequire` finds it there.
  *
  * For the daytona provider, callers should supply `harness.command`
@@ -20,7 +20,7 @@ import { createCommand, parseJsonLine, resolveModel } from "./common.js";
  * resolved via PATH, since snapshots ship the runner preinstalled
  * alongside the harness binaries — same model as `DAYTONA_CLAUDE_CLI_PATH`).
  *
- * Why a separately published package: `@cyrus/cursor-runner` is a thin
+ * Why a separately published package: `@cyrus-ai/cursor-runner` is a thin
  * SDK driver that wraps `@cursor/sdk` and emits `SDKMessage` events as
  * JSONL — exactly the wire format `parseJsonLine` parses below. Owning
  * the producer means the cursor stream IS the SDK union by construction
@@ -34,7 +34,7 @@ import { createCommand, parseJsonLine, resolveModel } from "./common.js";
  * node_modules installs on the host.
  */
 const HOST_CURSOR_RUNNER_PATH = createRequire(import.meta.url).resolve(
-	"@cyrus/cursor-runner",
+	"@cyrus-ai/cursor-runner",
 );
 
 export const cursorHarness: HarnessAdapter = {
@@ -49,9 +49,9 @@ export const cursorHarness: HarnessAdapter = {
 		config: NormalizedAgentSessionConfig,
 		options: HarnessRunOptions,
 	) {
-		// We invoke `@cyrus/cursor-runner` instead of `cursor-agent` so the
+		// We invoke `@cyrus-ai/cursor-runner` instead of `cursor-agent` so the
 		// wire format matches `@cursor/sdk`'s `SDKMessage` union by
-		// construction. See `@cyrus/cursor-runner`'s README for the why.
+		// construction. See `@cyrus-ai/cursor-runner`'s README for the why.
 		//
 		// Two invocation shapes:
 		// - When `harness.command` is set (daytona snapshots), it's the

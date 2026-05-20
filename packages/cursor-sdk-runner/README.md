@@ -1,4 +1,4 @@
-# @cyrus/cursor-runner
+# @cyrus-ai/cursor-runner
 
 A thin CLI wrapper around [`@cursor/sdk`](https://www.npmjs.com/package/@cursor/sdk).
 Spawns a Cursor agent, runs one prompt, and emits each `SDKMessage` the SDK
@@ -19,7 +19,7 @@ typed Cursor streaming from any process.
 ## Install
 
 ```sh
-npm install -g @cyrus/cursor-runner
+npm install -g @cyrus-ai/cursor-runner
 ```
 
 ## Use

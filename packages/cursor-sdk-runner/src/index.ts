@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * @cyrus/cursor-runner — Cursor SDK runner.
+ * @cyrus-ai/cursor-runner — Cursor SDK runner.
  *
  * A thin process boundary around `@cursor/sdk`'s `Agent.create()` +
  * `run.stream()`. Reads a prompt and options from argv, emits each
@@ -15,7 +15,7 @@
  * whose schema is different from the SDK's and is not version-pinned
  * to anything you can import.
  *
- * **Usage** (after `npm install -g @cyrus/cursor-runner`):
+ * **Usage** (after `npm install -g @cyrus-ai/cursor-runner`):
  *
  *   cursor-runner \
  *     --prompt <text>          # required

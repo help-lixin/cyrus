@@ -1,5 +1,5 @@
 {
-	"name": "@cyrus/cursor-runner",
+	"name": "@cyrus-ai/cursor-runner",
 	"version": "0.2.51",
 	"description": "Cursor SDK runner — spawned by Cyrus's agent-runtime as a process boundary around @cursor/sdk, emitting SDKMessage events as JSONL on stdout so consumers get typed events with no schema drift.",
 	"type": "module",
