@@ -165,9 +165,9 @@ importers:
       '@computesdk/daytona':
         specifier: ^1.7.26
         version: 1.7.26(ws@8.20.0)
-      '@cursor/sdk':
-        specifier: 1.0.13
-        version: 1.0.13
+      '@cyrus/cursor-runner':
+        specifier: workspace:*
+        version: link:../cursor-sdk-runner
       computesdk:
         specifier: ^4.0.0
         version: 4.0.0
@@ -178,6 +178,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.2.123
         version: 0.2.123(zod@4.3.6)
+      '@cursor/sdk':
+        specifier: 1.0.13
+        version: 1.0.13
       '@google/gemini-cli-core':
         specifier: ^0.42.0
         version: 0.42.0(encoding@0.1.13)(express@5.2.1)
@@ -339,6 +342,22 @@ importers:
       cyrus-simple-agent-runner:
         specifier: workspace:*
         version: link:../simple-agent-runner
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.1.4
+        version: 3.2.4(@types/node@20.19.39)(@vitest/ui@3.2.4)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.8.3)
+
+  packages/cursor-sdk-runner:
+    dependencies:
+      '@cursor/sdk':
+        specifier: 1.0.13
+        version: 1.0.13
     devDependencies:
       '@types/node':
         specifier: ^20.0.0

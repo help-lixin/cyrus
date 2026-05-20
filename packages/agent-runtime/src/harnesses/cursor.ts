@@ -1,4 +1,4 @@
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import type { SDKMessage } from "@cursor/sdk";
 import type {
 	HarnessAdapter,
@@ -8,15 +8,24 @@ import type {
 import { createCommand, parseJsonLine, resolveModel } from "./common.js";
 
 /**
- * Absolute path to the vendored cursor driver script.
+ * Absolute path to the `@cyrus/cursor-runner` CLI entry, resolved via
+ * Node's standard module resolution from the runtime's package root.
  *
- * Built from `src/harnesses/cursor-driver.ts` → `dist/harnesses/cursor-driver.js`,
- * sibling to this file in both source and dist layouts. Resolved via
- * `import.meta.url` so it works whether the runtime is consumed directly
- * from `dist/` or via a pnpm workspace symlink.
+ * Why a separately published package: `@cyrus/cursor-runner` is a thin
+ * SDK driver that wraps `@cursor/sdk` and emits `SDKMessage` events as
+ * JSONL — exactly the wire format `parseJsonLine` parses below. Owning
+ * the producer means the cursor stream IS the SDK union by construction
+ * (no schema drift), and exporting it as a standalone CLI keeps the
+ * Cursor `@cursor/sdk` runtime dependency out of agent-runtime's
+ * surface (it's a devDep here, just for the `SDKMessage` type import).
+ *
+ * Resolved with `createRequire(import.meta.url)` rather than a relative
+ * `import.meta.url` URL so the path follows wherever pnpm/npm linked
+ * the package — which is the right behavior for both workspace symlinks
+ * and node_modules installs.
  */
-const CURSOR_DRIVER_PATH = fileURLToPath(
-	new URL("./cursor-driver.js", import.meta.url),
+const CURSOR_RUNNER_PATH = createRequire(import.meta.url).resolve(
+	"@cyrus/cursor-runner",
 );
 
 export const cursorHarness: HarnessAdapter = {
@@ -31,10 +40,10 @@ export const cursorHarness: HarnessAdapter = {
 		config: NormalizedAgentSessionConfig,
 		options: HarnessRunOptions,
 	) {
-		// We spawn `node <driver>` instead of `cursor-agent` so the wire
-		// format matches `@cursor/sdk`'s `SDKMessage` union by
-		// construction. See cursor-driver.ts for the why.
-		const args = [CURSOR_DRIVER_PATH, "--prompt", options.userPrompt];
+		// We spawn `node <@cyrus/cursor-runner>` instead of `cursor-agent`
+		// so the wire format matches `@cursor/sdk`'s `SDKMessage` union
+		// by construction. See `@cyrus/cursor-runner`'s README for the why.
+		const args = [CURSOR_RUNNER_PATH, "--prompt", options.userPrompt];
 
 		const model = resolveModel(config);
 		if (model) {

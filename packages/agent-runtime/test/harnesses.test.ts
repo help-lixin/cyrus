@@ -101,14 +101,16 @@ describe("harness adapters", () => {
 			{ userPrompt: "Patch the bug" },
 		);
 
-		// We now spawn `node <driver>` instead of `cursor-agent` so the
-		// stdout stream is `@cursor/sdk`'s `SDKMessage` directly. The
-		// driver path is resolved at module-load time via `import.meta.url`;
-		// it's stable across builds but absolute, so we assert the suffix
-		// rather than pin the whole path.
+		// We now spawn `node <@cyrus/cursor-runner>` instead of `cursor-agent`
+		// so the stdout stream is `@cursor/sdk`'s `SDKMessage` directly.
+		// The runner path is resolved at module-load time via
+		// `createRequire(import.meta.url).resolve("@cyrus/cursor-runner")`;
+		// pnpm/npm resolves through workspace symlinks to a real on-disk
+		// path that doesn't necessarily contain the package name literal,
+		// so we assert the entry filename instead.
 		expect(command.command).toBe("node");
-		const driverPath = command.args[0]!;
-		expect(driverPath).toMatch(/cursor-driver\.js$/);
+		const runnerPath = command.args[0]!;
+		expect(runnerPath).toMatch(/cursor-(sdk-)?runner[/\\]dist[/\\]index\.js$/);
 		expect(command.args.slice(1)).toEqual([
 			"--prompt",
 			"Patch the bug",
