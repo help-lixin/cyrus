@@ -61,9 +61,7 @@ describe("log_failure_mode tool", () => {
 			sessionLogsUrl: undefined,
 			runnerSessionId: null,
 			runnerType: null,
-			linearAgentSessionId: null,
 			linearIssueIdentifier: null,
-			linearIssueUrl: null,
 			workspacePath: "/work/CYPACK-1",
 		});
 
@@ -124,9 +122,7 @@ describe("log_failure_mode tool", () => {
 				sessionId: "cyrus-internal-abc",
 				runnerSessionId: "claude-9f87",
 				runnerType: "claude" as const,
-				linearAgentSessionId: "agent-sess-zzz",
 				linearIssueIdentifier: "ENG-76",
-				linearIssueUrl: null,
 				workspacePath: "/home/payton/.cyrus/worktrees/ENG-76",
 				sessionSource: "linear",
 			}),
@@ -144,7 +140,6 @@ describe("log_failure_mode tool", () => {
 		expect(callArg.sessionId).toBe("cyrus-internal-abc");
 		expect(callArg.runnerSessionId).toBe("claude-9f87");
 		expect(callArg.runnerType).toBe("claude");
-		expect(callArg.linearAgentSessionId).toBe("agent-sess-zzz");
 		expect(callArg.linearIssueIdentifier).toBe("ENG-76");
 		expect(callArg.workspacePath).toBe("/home/payton/.cyrus/worktrees/ENG-76");
 	});

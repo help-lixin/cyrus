@@ -52,14 +52,8 @@ export function createFetchFailureModesClient(
 							? { runnerSessionId: input.runnerSessionId }
 							: {}),
 						...(input.runnerType ? { runnerType: input.runnerType } : {}),
-						...(input.linearAgentSessionId
-							? { linearAgentSessionId: input.linearAgentSessionId }
-							: {}),
 						...(input.linearIssueIdentifier
 							? { linearIssueIdentifier: input.linearIssueIdentifier }
-							: {}),
-						...(input.linearIssueUrl
-							? { linearIssueUrl: input.linearIssueUrl }
 							: {}),
 						...(input.workspacePath
 							? { workspacePath: input.workspacePath }

@@ -5637,20 +5637,20 @@ ${taskSection}`;
 					? "slack"
 					: (session.issueContext?.trackerId ?? "linear");
 
+		// For Linear-source sessions, `session.id` is already the Linear
+		// AgentSession id (they're literally the same UUID — the v3 rename
+		// from `linearAgentActivitySessionId` to `id` kept the value). So we
+		// don't surface a separate `linearAgentSessionId` — the server keys
+		// dedup on `session_id` and that *is* the Linear AgentSession id when
+		// `session_source === 'linear'`.
 		return {
 			sessionId: session.id,
 			runnerSessionId,
 			runnerType,
-			linearAgentSessionId: session.externalSessionId ?? null,
 			linearIssueIdentifier:
 				session.issueContext?.issueIdentifier ??
 				session.issue?.identifier ??
 				null,
-			// IssueMinimal carries `identifier` but not `url`; the server-side
-			// failure-modes service builds a click-through link from the
-			// identifier + the team's stored Linear workspace slug. Leaving
-			// `linearIssueUrl` null here keeps the harness platform-agnostic.
-			linearIssueUrl: null,
 			workspacePath: session.workspace?.path ?? null,
 			sessionSource,
 		};

@@ -9,16 +9,13 @@ import { z } from "zod";
  *
  * Triage on the receiving end needs:
  *   - `sessionId` — cyrus internal session UUID, used as the dedup key
- *     server-side so repeated reports of the same failure on the same
- *     session+category comment on the existing Linear ticket.
+ *     server-side AND (for Linear sessions) the Linear AgentSession id —
+ *     these are the same value.
  *   - `runnerSessionId` + `runnerType` — the underlying Claude / Gemini
  *     / Codex / Cursor session id so a team member can fetch the
  *     transcript that produced the failure.
- *   - `linearAgentSessionId` — the Linear AgentSession id of the customer
- *     conversation (distinct from the failure-modes ticket the server
- *     opens). Lets triage jump to the live thread.
- *   - `linearIssueIdentifier` + `linearIssueUrl` — the customer's
- *     original issue (e.g. "ENG-76"), for click-through context.
+ *   - `linearIssueIdentifier` — the customer's original issue (e.g.
+ *     "ENG-76"), for finding the source thread.
  *   - `workspacePath` — the agent's cwd, in case it differs from the
  *     `cwd` the agent reported (e.g. shells in a subdir).
  *   - `sessionSource` — "linear" / "slack" / "github" / "gitlab" /
@@ -32,9 +29,7 @@ export interface ResolvedSession {
 	sessionId: string;
 	runnerSessionId?: string | null;
 	runnerType?: "claude" | "gemini" | "codex" | "cursor" | null;
-	linearAgentSessionId?: string | null;
 	linearIssueIdentifier?: string | null;
-	linearIssueUrl?: string | null;
 	workspacePath?: string | null;
 	sessionSource?: string | null;
 }
@@ -58,9 +53,7 @@ export interface FailureModesHttpClient {
 		sessionLogsUrl?: string;
 		runnerSessionId?: string | null;
 		runnerType?: string | null;
-		linearAgentSessionId?: string | null;
 		linearIssueIdentifier?: string | null;
-		linearIssueUrl?: string | null;
 		workspacePath?: string | null;
 	}): Promise<
 		| {
@@ -194,9 +187,7 @@ export function registerLogFailureModeTool(
 				sessionLogsUrl: session_logs_url,
 				runnerSessionId: ctx.runnerSessionId ?? null,
 				runnerType: ctx.runnerType ?? null,
-				linearAgentSessionId: ctx.linearAgentSessionId ?? null,
 				linearIssueIdentifier: ctx.linearIssueIdentifier ?? null,
-				linearIssueUrl: ctx.linearIssueUrl ?? null,
 				workspacePath: ctx.workspacePath ?? cwd,
 			});
 
