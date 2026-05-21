@@ -32,10 +32,6 @@ export interface IMcpConfigProvider {
 	buildMergedMcpConfigPath(
 		repositories: RepositoryConfig | RepositoryConfig[],
 	): string | string[] | undefined;
-	resolveMcpConfigPaths(
-		platformOverrides: readonly string[] | undefined,
-		repositories: RepositoryConfig | RepositoryConfig[],
-	): string | string[] | undefined;
 }
 
 /**
@@ -173,20 +169,19 @@ export class RunnerConfigBuilder {
 	 * config without hooks or model selection.
 	 */
 	buildChatConfig(input: ChatRunnerConfigInput): AgentRunnerConfig {
-		// MCP config paths: prefer the platform override list when set —
-		// it's the only source consulted. Otherwise fall back to the
-		// repository's mcpConfigPath (legacy behavior).
-		const mcpConfigPath = input.repository
-			? this.mcpConfigProvider.resolveMcpConfigPaths(
-					input.platformMcpConfigOverrides,
-					input.repository,
-				)
-			: input.platformMcpConfigOverrides &&
-					input.platformMcpConfigOverrides.length > 0
-				? this.mcpConfigProvider.resolveMcpConfigPaths(
-						input.platformMcpConfigOverrides,
-						[],
-					)
+		// MCP config paths for chat sessions come exclusively from the
+		// platform override list (e.g. `slackMcpConfigs`). Chat sessions
+		// are repo-agnostic at the session level — we do NOT fall back to
+		// "first repo wins" `repository.mcpConfigPath` (the prior V1
+		// default), because that arbitrarily privileged whichever repo
+		// loaded first. When the platform list is empty, the chat
+		// session simply loads no per-repo `.mcp.json` files.
+		const mcpConfigPath =
+			input.platformMcpConfigOverrides &&
+			input.platformMcpConfigOverrides.length > 0
+				? input.platformMcpConfigOverrides.length === 1
+					? input.platformMcpConfigOverrides[0]
+					: [...input.platformMcpConfigOverrides]
 				: undefined;
 
 		// Build fresh MCP config at session start (reads current token from config)
@@ -327,10 +322,27 @@ export class RunnerConfigBuilder {
 			input.sessionId,
 			input.mcpOptions,
 		);
-		const mcpConfigPath = this.mcpConfigProvider.resolveMcpConfigPaths(
-			input.platformMcpConfigOverrides,
-			input.repository,
-		);
+		// Repo-override vs platform-default resolution for MCP config paths:
+		//   - If the routed repo has its own `allowedTools` override, it
+		//     also owns its own MCP config — use `repository.mcpConfigPath`
+		//     so the repo-scoped allow-list lines up with the repo-scoped
+		//     server set. The two travel as a unit.
+		//   - Otherwise the repo inherits the platform's allow-list, and
+		//     should likewise inherit the platform's MCP config list
+		//     (`linearMcpConfigs` / `githubMcpConfigs`).
+		// This guarantees the agent's permission rules and the loaded MCP
+		// server set always come from the same scope.
+		const repoHasAllowedToolsOverride =
+			Array.isArray(input.repository.allowedTools) &&
+			input.repository.allowedTools.length > 0;
+		const mcpConfigPath = repoHasAllowedToolsOverride
+			? this.mcpConfigProvider.buildMergedMcpConfigPath(input.repository)
+			: input.platformMcpConfigOverrides &&
+					input.platformMcpConfigOverrides.length > 0
+				? input.platformMcpConfigOverrides.length === 1
+					? input.platformMcpConfigOverrides[0]
+					: [...input.platformMcpConfigOverrides]
+				: undefined;
 
 		const config: AgentRunnerConfig & Record<string, unknown> = {
 			workingDirectory: input.session.workspace.path,

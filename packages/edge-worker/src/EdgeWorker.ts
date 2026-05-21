@@ -6439,12 +6439,21 @@ ${input.userComment}
 					);
 
 					// Merge any file-based MCP configs (reuses shared normalization).
-					// Warmup paths are reconstructing Linear-triggered issue
-					// sessions, so the Linear override list applies.
-					const mcpConfigPath = this.mcpConfigService.resolveMcpConfigPaths(
-						this.config.linearMcpConfigs,
-						repo,
-					);
+					// Warmup paths reconstruct Linear-triggered issue sessions:
+					// if the repo has its own `allowedTools` override its
+					// mcpConfigPath stays scoped to that repo, otherwise the
+					// team-level `linearMcpConfigs` list applies. Same coupling
+					// the live `buildIssueConfig` path uses.
+					const repoHasAllowedToolsOverride =
+						Array.isArray(repo.allowedTools) && repo.allowedTools.length > 0;
+					const mcpConfigPath = repoHasAllowedToolsOverride
+						? this.mcpConfigService.buildMergedMcpConfigPath(repo)
+						: this.config.linearMcpConfigs &&
+								this.config.linearMcpConfigs.length > 0
+							? this.config.linearMcpConfigs.length === 1
+								? this.config.linearMcpConfigs[0]
+								: [...this.config.linearMcpConfigs]
+							: undefined;
 					let mcpServers: Record<string, McpServerConfig> = { ...mcpConfig };
 					if (mcpConfigPath) {
 						const paths = Array.isArray(mcpConfigPath)
