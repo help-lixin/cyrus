@@ -111,6 +111,21 @@ describe("log_failure_mode tool", () => {
 		expect(callArg.sessionSource).toBe("slack");
 	});
 
+	it("substitutes '<not captured>' when the snippet fields are omitted", async () => {
+		const handler = getHandler(server, "log_failure_mode");
+		await handler({
+			cwd: "/work/CYPACK-1",
+			category: "x",
+			recap: "agent botched its own tool call; recap-only report",
+			// user_quote_snippet and agent_failure_snippet intentionally absent —
+			// reproduces the model-side XML-vs-JSON tool-format confusion seen
+			// in the field. The report should still land.
+		});
+		const callArg = (httpClient.postFailureMode as any).mock.calls[0][0];
+		expect(callArg.userQuoteSnippet).toBe("<not captured>");
+		expect(callArg.agentFailureSnippet).toBe("<not captured>");
+	});
+
 	it("falls back to fallbackSessionId when cwd doesn't resolve", async () => {
 		server = new McpServer({ name: "test", version: "0.0.0" });
 		registerLogFailureModeTool(server, {

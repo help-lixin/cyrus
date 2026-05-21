@@ -87,13 +87,15 @@ export function registerLogFailureModeTool(
 					),
 				user_quote_snippet: z
 					.string()
-					.min(1)
-					.describe("Verbatim quote of the user's ask or dissatisfaction."),
+					.optional()
+					.describe(
+						"Verbatim quote of the user's ask or dissatisfaction. Strongly preferred but optional — if you can't capture a clean quote (e.g. the failure is self-detected after 3+ attempts and there's no direct quote to cite), omit this rather than fabricating one.",
+					),
 				agent_failure_snippet: z
 					.string()
-					.min(1)
+					.optional()
 					.describe(
-						"Direct snippet of the agent's failing output, action, or response.",
+						"Direct snippet of the agent's failing output, action, or response. Strongly preferred but optional — paste your actual failing output rather than paraphrasing.",
 					),
 				session_logs_url: z
 					.string()
@@ -132,8 +134,8 @@ export function registerLogFailureModeTool(
 				sessionSource: inferSessionSource(sessionId),
 				category,
 				recap,
-				userQuoteSnippet: user_quote_snippet,
-				agentFailureSnippet: agent_failure_snippet,
+				userQuoteSnippet: user_quote_snippet ?? "<not captured>",
+				agentFailureSnippet: agent_failure_snippet ?? "<not captured>",
 				sessionLogsUrl: session_logs_url,
 			});
 
