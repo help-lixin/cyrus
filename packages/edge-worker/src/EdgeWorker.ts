@@ -341,8 +341,23 @@ export class EdgeWorker extends EventEmitter {
 		// Initialize GitHub comment service for posting replies to GitHub PRs
 		this.gitHubCommentService = new GitHubCommentService();
 
-		// Initialize GitLab comment service for posting replies to GitLab MRs
-		this.gitLabCommentService = new GitLabCommentService();
+		// Initialize GitLab comment service for posting replies to GitLab MRs.
+		// For Self-Managed GitLab the API base URL must be derived from the
+		// configured repos' gitlabUrl host; otherwise the service falls back to
+		// gitlab.com and 404s on every reply. Picks the first configured
+		// GitLab repo's host (single GitLab host per Cyrus instance).
+		const firstGitlabRepo = config.repositories.find((r) => r.gitlabUrl);
+		let gitlabApiBaseUrl: string | undefined;
+		if (firstGitlabRepo?.gitlabUrl) {
+			try {
+				gitlabApiBaseUrl = new URL(firstGitlabRepo.gitlabUrl).origin;
+			} catch {
+				// malformed gitlabUrl — leave undefined and fall through to default
+			}
+		}
+		this.gitLabCommentService = new GitLabCommentService(
+			gitlabApiBaseUrl ? { apiBaseUrl: gitlabApiBaseUrl } : undefined,
+		);
 
 		// Initialize global session registry (centralized session storage)
 		this.globalSessionRegistry = new GlobalSessionRegistry();
@@ -449,8 +464,6 @@ export class EdgeWorker extends EventEmitter {
 					parentSessionId,
 					prompt,
 					childSessionId,
-					repo,
-					this.agentSessionManager,
 				);
 			},
 		);
@@ -2650,8 +2663,6 @@ ${taskSection}`;
 		parentSessionId: string,
 		prompt: string,
 		childSessionId: string,
-		_childRepo: RepositoryConfig,
-		childAgentSessionManager: AgentSessionManager,
 	): Promise<void> {
 		const log = this.logger.withContext({ sessionId: parentSessionId });
 		log.info(
@@ -2682,8 +2693,7 @@ ${taskSection}`;
 		);
 
 		// Get the child session to access its workspace path
-		// Child session is in the child's manager (passed in from the callback)
-		const childSession = childAgentSessionManager.getSession(childSessionId);
+		const childSession = this.agentSessionManager.getSession(childSessionId);
 		const childWorkspaceDirs: string[] = [];
 		if (childSession) {
 			childWorkspaceDirs.push(childSession.workspace.path);
