@@ -5546,18 +5546,18 @@ ${taskSection}`;
 
 	/**
 	 * Lazily build the HTTP client used by `log_failure_mode` to POST to
-	 * cyrus-hosted. Returns null when either the proxy base URL or the
-	 * `CYRUS_API_KEY` are missing — in that mode the tool is simply not
-	 * registered, so customer-mode CLI users without a control plane don't
-	 * see a broken tool.
+	 * cyrus-hosted. Uses `CYRUS_APP_URL` (the same env var the remote
+	 * session-store client reads, see top of this file) so preview
+	 * environments and prod share a single way to point at a control
+	 * plane. Returns null when either the URL or the `CYRUS_API_KEY` are
+	 * missing — in that mode the tool is simply not registered, so
+	 * customer-mode CLI users without a control plane don't see a broken
+	 * tool.
 	 */
 	private getFailureModesClient(): FailureModesHttpClient | null {
 		if (this.failureModesClient) return this.failureModesClient;
 		const apiKey = process.env.CYRUS_API_KEY?.trim();
-		const baseUrl =
-			process.env.CYRUS_PROXY_URL?.trim() ||
-			this.config.proxyUrl ||
-			DEFAULT_PROXY_URL;
+		const baseUrl = process.env.CYRUS_APP_URL?.trim();
 		if (!apiKey || !baseUrl) return null;
 		this.failureModesClient = createFetchFailureModesClient({
 			baseUrl,
