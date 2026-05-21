@@ -27,6 +27,8 @@ describe("log_failure_mode tool", () => {
 			postFailureMode: vi.fn(async () => ({
 				ok: true,
 				reportId: 7,
+				action: "created" as const,
+				linearIssueUrl: "https://linear.app/ceedar/issue/CYPACK-9999",
 			})),
 		};
 		resolveSessionFromCwd = vi.fn((cwd: string) =>
@@ -62,6 +64,8 @@ describe("log_failure_mode tool", () => {
 		const payload = JSON.parse(result.content[0].text);
 		expect(payload.success).toBe(true);
 		expect(payload.reportId).toBe(7);
+		expect(payload.action).toBe("created");
+		expect(payload.linearIssueUrl).toMatch(/CYPACK-9999/);
 		expect(payload.sessionId).toBe("session-abc");
 	});
 

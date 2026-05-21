@@ -24,7 +24,12 @@ export interface FailureModesHttpClient {
 		agentFailureSnippet: string;
 		sessionLogsUrl?: string;
 	}): Promise<
-		| { ok: true; reportId: number | null }
+		| {
+				ok: true;
+				reportId: number | null;
+				action: "created" | "commented" | null;
+				linearIssueUrl: string | null;
+		  }
 		| { ok: false; status: number; error: string }
 	>;
 }
@@ -153,6 +158,8 @@ export function registerLogFailureModeTool(
 						text: JSON.stringify({
 							success: true,
 							reportId: result.reportId,
+							action: result.action,
+							linearIssueUrl: result.linearIssueUrl,
 							sessionId,
 						}),
 					},

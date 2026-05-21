@@ -9,6 +9,8 @@ describe("createFetchFailureModesClient", () => {
 					JSON.stringify({
 						success: true,
 						reportId: 42,
+						action: "created",
+						linearIssueUrl: "https://linear.app/x/issue/Y-1",
 					}),
 					{ status: 200, headers: { "content-type": "application/json" } },
 				),
@@ -37,7 +39,12 @@ describe("createFetchFailureModesClient", () => {
 		const body = JSON.parse(init.body);
 		expect(body.sessionId).toBe("sess-1");
 		expect(body.sessionSource).toBe("slack");
-		expect(result).toEqual({ ok: true, reportId: 42 });
+		expect(result).toEqual({
+			ok: true,
+			reportId: 42,
+			action: "created",
+			linearIssueUrl: "https://linear.app/x/issue/Y-1",
+		});
 	});
 
 	it("maps non-2xx response to a structured error", async () => {

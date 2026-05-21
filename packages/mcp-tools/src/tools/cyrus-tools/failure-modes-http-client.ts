@@ -72,7 +72,15 @@ export function createFetchFailureModesClient(
 					typeof parsed?.reportId === "number"
 						? (parsed.reportId as number)
 						: null;
-				return { ok: true, reportId };
+				const action =
+					parsed?.action === "created" || parsed?.action === "commented"
+						? (parsed.action as "created" | "commented")
+						: null;
+				const linearIssueUrl =
+					typeof parsed?.linearIssueUrl === "string"
+						? (parsed.linearIssueUrl as string)
+						: null;
+				return { ok: true, reportId, action, linearIssueUrl };
 			} catch (err) {
 				return {
 					ok: false,
