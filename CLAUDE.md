@@ -444,6 +444,10 @@ The agent automatically moves issues to the "started" state when assigned. Linea
 
    Symptom of forgetting this: the field appears in `~/.cyrus/config.json`, the cyrus process is restarted, but downstream code keeps seeing the default (or never picks up hot-reloads). This bit us with `slackAllowedTools` / `githubAllowedTools` / `slackMcpConfigs` / `linearMcpConfigs` / `githubMcpConfigs` during CYHOST-967.
 
+10. **Changing the `cyrus-tools` MCP server's exposed tools**: When you add or remove a tool from the inline `cyrus-tools` MCP server (the one served by `apps/proxy` / wired up in `McpConfigService.buildMcpConfig`), you **must also update the catalog `cyrus-hosted` keeps for the `/settings/tools` UI**. cyrus-hosted maintains a per-server tool list so its grid can render a row per tool (with the right per-platform toggle) without having to introspect a live MCP server. Today that catalog lives in `apps/app/src/lib/cyrus-config/builder.ts` under the `KNOWN_MCP_TOOLS` map (look for the `"mcp__cyrus-tools"` key); update that array in the same PR — the same constants are also imported by the platform-default lists in `packages/core/src/allowed-tools-defaults.ts` when a particular `cyrus-tools` tool is enabled by default, so reflect that there too if the new tool should be on out of the box.
+
+   Symptom of forgetting this: the new tool is callable at runtime (the runtime knows about it via the live MCP server) but it never appears in the `/settings/tools` MCP Servers section — so operators can't see it, can't toggle it on/off per platform, and per-repo overrides treat it as unknown.
+
 ## Dependency Security Policy (MANDATE)
 
 Our team's mandated approach for addressing Dependabot advisories and other
