@@ -195,7 +195,7 @@ export class WorkerService {
 			repositories,
 			cyrusHome: this.cyrusHome,
 			linearAllowedTools:
-				process.env.ALLOWED_TOOLS?.split(",").map((t) => t.trim()) ||
+				process.env.LINEAR_ALLOWED_TOOLS?.split(",").map((t) => t.trim()) ||
 				edgeConfig.linearAllowedTools ||
 				[],
 			slackAllowedTools: edgeConfig.slackAllowedTools,
