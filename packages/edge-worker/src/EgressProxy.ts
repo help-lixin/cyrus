@@ -82,6 +82,9 @@ export class EgressProxy {
 	/** Set of allowed domain patterns (if policy specifies allow rules) */
 	private allowedDomains = new Set<string>();
 
+	/** Tracks active SOCKS client sockets so they can be force-closed on stop() */
+	private activeSocksSockets = new Set<Socket>();
+
 	private isRunning = false;
 
 	constructor(config: SandboxConfig, cyrusHome: string, logger?: ILogger) {
@@ -205,6 +208,16 @@ export class EgressProxy {
 	 */
 	async stop(): Promise<void> {
 		if (!this.isRunning) return;
+
+		// Force-close all tracked connections so server.close() doesn't hang
+		// waiting for keep-alive or in-flight connections to drain. Node.js 22
+		// holds keep-alive connections open longer than Node 20, causing afterEach
+		// hooks to time out without this.
+		this.httpServer?.closeAllConnections();
+		for (const socket of this.activeSocksSockets) {
+			socket.destroy();
+		}
+		this.activeSocksSockets.clear();
 
 		const stops: Promise<void>[] = [];
 
@@ -660,10 +673,11 @@ export class EgressProxy {
 			);
 			clientSocket.destroy();
 		});
+		serverSocket.on("close", () => clientSocket.destroy());
 
-		clientSocket.on("error", () => {
-			serverSocket.destroy();
-		});
+		clientSocket.on("error", () => serverSocket.destroy());
+		// Also handle graceful FIN (no error event) from the client side
+		clientSocket.on("close", () => serverSocket.destroy());
 	}
 
 	/**
@@ -780,6 +794,8 @@ export class EgressProxy {
 
 	private async startSocksProxy(): Promise<void> {
 		this.socksServer = createNetServer((socket) => {
+			this.activeSocksSockets.add(socket);
+			socket.on("close", () => this.activeSocksSockets.delete(socket));
 			this.handleSocksConnection(socket);
 		});
 
