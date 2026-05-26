@@ -50,7 +50,7 @@ Construct the manifest, substituting `<AGENT_NAME>`, `<AGENT_DESCRIPTION>`, and 
     "features": {
         "bot_user": {
             "display_name": "<AGENT_NAME>",
-            "always_online": false
+            "always_online": true
         }
     },
     "oauth_config": {
