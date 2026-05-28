@@ -57,7 +57,7 @@ export class RunnerSelectionService {
 			return (
 				this.config.claudeDefaultModel ||
 				this.config.defaultModel ||
-				"claude-opus-4-8"
+				"opus"
 			);
 		}
 		if (runnerType === "gemini") {
