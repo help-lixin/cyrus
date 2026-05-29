@@ -86,6 +86,10 @@ class TestChatAdapter implements ChatPlatformAdapter<TestEvent> {
 		return;
 	}
 
+	async postErrorReply(_event: TestEvent, _message: string): Promise<void> {
+		return;
+	}
+
 	async acknowledgeReceipt(_event: TestEvent): Promise<void> {
 		return;
 	}
@@ -147,6 +151,74 @@ describe("ChatSessionHandler chat session permissions", () => {
 		for (const path of chatRepositoryPaths) {
 			expect(capturedConfig.allowedDirectories).toContain(path);
 		}
+	});
+});
+
+describe("ChatSessionHandler runner-failure handling", () => {
+	const apiError =
+		"Claude Code returned an error result: API Error: 400 messages.1.content.3: `thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified.";
+
+	function buildHandler(startImpl: () => Promise<any>) {
+		const adapter = new TestChatAdapter("thread-key");
+		const postErrorReplySpy = vi.spyOn(adapter, "postErrorReply");
+		const createRunner = vi.fn(
+			() =>
+				({
+					supportsStreamingInput: false,
+					start: vi.fn(startImpl),
+					stop: vi.fn(),
+					isRunning: vi.fn().mockReturnValue(false),
+					isStreaming: vi.fn().mockReturnValue(false),
+					addStreamMessage: vi.fn(),
+					getMessages: vi.fn().mockReturnValue([]),
+				}) as any,
+		);
+		const handler = new ChatSessionHandler(adapter, {
+			cyrusHome: TEST_CYRUS_CHAT,
+			chatRepositoryProvider: createStaticProvider(["/repo/chat-one"]),
+			runnerConfigBuilder: createMockRunnerConfigBuilder(),
+			createRunner,
+			onWebhookStart: vi.fn(),
+			onWebhookEnd: vi.fn(),
+			onStateChange: vi.fn().mockResolvedValue(undefined),
+			onClaudeError: vi.fn(),
+		});
+		return { handler, postErrorReplySpy };
+	}
+
+	it("posts an attributed provider error to the thread when the runner rejects with an API error", async () => {
+		const { handler, postErrorReplySpy } = buildHandler(() =>
+			Promise.reject(new Error(apiError)),
+		);
+
+		await handler.handleEvent({
+			eventId: "test-event",
+			threadKey: "test-thread",
+		} as any);
+
+		await vi.waitFor(() => expect(postErrorReplySpy).toHaveBeenCalledTimes(1));
+		const message = postErrorReplySpy.mock.calls[0][1];
+		expect(message).toContain("**Claude API error**");
+		expect(message).toContain("not from Cyrus");
+		expect(message).toContain("start a new thread to reset the conversation");
+		expect(message).toContain("`thinking` or `redacted_thinking` blocks");
+		// The runner wrapper prefix should be stripped from the surfaced text.
+		expect(message).not.toContain("Claude Code returned an error result");
+	});
+
+	it("does not post to the thread for non-provider runner errors", async () => {
+		const { handler, postErrorReplySpy } = buildHandler(() =>
+			Promise.reject(new Error("ENOENT: workspace directory missing")),
+		);
+
+		await handler.handleEvent({
+			eventId: "test-event",
+			threadKey: "test-thread",
+		} as any);
+
+		// Give the rejected promise's catch a chance to run.
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(postErrorReplySpy).not.toHaveBeenCalled();
 	});
 });
 

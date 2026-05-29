@@ -12,6 +12,12 @@ import { createLogger } from "cyrus-core";
 import { AgentSessionManager } from "./AgentSessionManager.js";
 import type { ChatRepositoryProvider } from "./ChatRepositoryProvider.js";
 import type { RunnerConfigBuilder } from "./RunnerConfigBuilder.js";
+import {
+	formatModelApiError,
+	isModelApiErrorText,
+	runnerTypeFromConstructorName,
+	unwrapRunnerErrorMessage,
+} from "./runner-error-formatting.js";
 
 /**
  * Defines what each chat platform must provide for the generic session lifecycle.
@@ -42,6 +48,13 @@ export interface ChatPlatformAdapter<TEvent> {
 
 	/** Post the agent's final response back to the platform */
 	postReply(event: TEvent, runner: IAgentRunner): Promise<void>;
+
+	/**
+	 * Post an error message back to the platform thread when the runner fails
+	 * before producing a final response (e.g. a provider API error). The message
+	 * is already user-facing/formatted. Fire-and-forget at the call site.
+	 */
+	postErrorReply(event: TEvent, message: string): Promise<void>;
 
 	/** Acknowledge receipt of the event (e.g., emoji reaction). Fire-and-forget */
 	acknowledgeReceipt(event: TEvent): Promise<void>;
@@ -290,9 +303,11 @@ export class ChatSessionHandler<TEvent> {
 						`${this.adapter.platformName} session error for event ${eventId}`,
 						error instanceof Error ? error : new Error(String(error)),
 					);
-					// Runner died before emitting a final `result`. Drop any
-					// still-queued reply events for this session so a later
-					// resumeSession() doesn't pair them with a future turn.
+					// Runner died before emitting a final `result`. Surface a
+					// provider-attributed error to the thread (so the user isn't
+					// left in silence), then drop any still-queued reply events so a
+					// later resumeSession() doesn't pair them with a future turn.
+					void this.postRunnerFailure(event, sessionId, error);
 					this.clearPendingReplies(sessionId);
 				})
 				.finally(() => {
@@ -403,6 +418,9 @@ export class ChatSessionHandler<TEvent> {
 					`${this.adapter.platformName} resume session error for ${sessionId}`,
 					error instanceof Error ? error : new Error(String(error)),
 				);
+				// Surface a provider-attributed error to the thread (so the user
+				// isn't left in silence) before dropping queued reply events.
+				void this.postRunnerFailure(event, sessionId, error);
 				this.clearPendingReplies(sessionId);
 			});
 	}
@@ -461,6 +479,46 @@ export class ChatSessionHandler<TEvent> {
 	 * the first `result` of the new runner and shift all subsequent replies
 	 * by one turn.
 	 */
+	/**
+	 * When a runner rejects before emitting a final `result`, the user would
+	 * otherwise be left in silence (or, worse, see a raw provider error). If the
+	 * failure is a model-provider API error (e.g. Claude's "API Error: 400 …
+	 * `thinking` blocks … cannot be modified"), post a clearly-attributed message
+	 * with recovery guidance to the thread instead.
+	 *
+	 * Only model-provider API errors are surfaced; unexpected internal errors are
+	 * left to the logs to avoid leaking implementation detail into user threads.
+	 */
+	private async postRunnerFailure(
+		event: TEvent,
+		sessionId: string,
+		error: unknown,
+	): Promise<void> {
+		try {
+			const rawMessage =
+				error instanceof Error ? error.message : String(error ?? "");
+			const providerError = unwrapRunnerErrorMessage(rawMessage);
+			if (!isModelApiErrorText(providerError)) {
+				return;
+			}
+			const runner = this.sessionManager.getAgentRunner(sessionId);
+			const runnerType = runnerTypeFromConstructorName(
+				runner?.constructor?.name,
+			);
+			const message = formatModelApiError(
+				providerError,
+				runnerType,
+				"You can try sending your message again. If this keeps happening, start a new thread to reset the conversation.",
+			);
+			await this.adapter.postErrorReply(event, message);
+		} catch (postError) {
+			this.logger.error(
+				`Failed to post ${this.adapter.platformName} runner-failure reply`,
+				postError instanceof Error ? postError : new Error(String(postError)),
+			);
+		}
+	}
+
 	private clearPendingReplies(sessionId: string): void {
 		const queue = this.pendingReplyEvents.get(sessionId);
 		if (!queue || queue.length === 0) return;

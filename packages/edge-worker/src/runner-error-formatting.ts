@@ -61,6 +61,23 @@ export function isModelApiErrorText(text: string | undefined | null): boolean {
 }
 
 /**
+ * Recover the raw provider error text from a thrown runner error message.
+ *
+ * When the SDK returns an error result, the runner rejects with an Error whose
+ * message is wrapped, e.g.:
+ *   "Claude Code returned an error result: API Error: 400 …"
+ * Strip that wrapper so detection/formatting operates on the underlying
+ * provider text ("API Error: 400 …").
+ */
+export function unwrapRunnerErrorMessage(
+	message: string | undefined | null,
+): string {
+	if (!message) return "";
+	const match = message.match(/error result:\s*(.*)$/is);
+	return (match?.[1] ?? message).trim();
+}
+
+/**
  * Prefix model/provider error content with a clear attribution so the user can
  * tell the failure came from the model provider's API and not from Cyrus.
  *

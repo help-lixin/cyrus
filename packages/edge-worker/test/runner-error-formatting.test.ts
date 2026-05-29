@@ -3,7 +3,38 @@ import {
 	formatModelApiError,
 	isModelApiErrorText,
 	runnerTypeFromConstructorName,
+	unwrapRunnerErrorMessage,
 } from "../src/runner-error-formatting";
+
+describe("unwrapRunnerErrorMessage", () => {
+	it("strips the runner's error-result wrapper prefix", () => {
+		expect(
+			unwrapRunnerErrorMessage(
+				"Claude Code returned an error result: API Error: 400 thinking blocks cannot be modified",
+			),
+		).toBe("API Error: 400 thinking blocks cannot be modified");
+	});
+
+	it("returns the message unchanged when there is no wrapper", () => {
+		expect(unwrapRunnerErrorMessage("API Error: Internal server error")).toBe(
+			"API Error: Internal server error",
+		);
+	});
+
+	it("handles multiline error bodies", () => {
+		expect(
+			unwrapRunnerErrorMessage(
+				"returned an error result: API Error: 400\nmore detail here",
+			),
+		).toBe("API Error: 400\nmore detail here");
+	});
+
+	it("returns empty string for empty/undefined/null", () => {
+		expect(unwrapRunnerErrorMessage("")).toBe("");
+		expect(unwrapRunnerErrorMessage(undefined)).toBe("");
+		expect(unwrapRunnerErrorMessage(null)).toBe("");
+	});
+});
 
 describe("runnerTypeFromConstructorName", () => {
 	it("maps known runner constructor names", () => {
