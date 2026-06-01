@@ -19,10 +19,8 @@ import type {
 	RunnerType,
 } from "cyrus-core";
 import { buildIntentToAddHook } from "./hooks/IntentToAddHook.js";
-import {
-	buildMemoryLimitHook,
-	buildOomReportHook,
-} from "./hooks/MemoryLimitHook.js";
+import { buildMemoryLimitHook } from "./hooks/MemoryLimitHook.js";
+import { buildOomReportHook } from "./hooks/OomReportHook.js";
 import { buildPrMarkerHook } from "./hooks/PrMarkerHook.js";
 import { appendBrowserUseAddendum } from "./prompts/browserUsePromptAddendum.js";
 import { appendFailureModeAddendum } from "./prompts/failureModePromptAddendum.js";
