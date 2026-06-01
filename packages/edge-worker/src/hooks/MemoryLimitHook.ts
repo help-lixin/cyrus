@@ -12,8 +12,25 @@ import {
 	wrapCommand,
 } from "./cyrus-tool-exec.js";
 
-/** Env var gating the whole cloud-runtime feature. */
-const RUNTIME_ENV = "CYRUS_RUNTIME";
+/**
+ * Env var gating the whole cloud-runtime feature. cyrus-hosted sets this to a
+ * truthy value on cloud-runtime droplets and leaves it unset for self-host.
+ * Kept identical to the `CYRUS_CLOUD_RUNTIME` gate used by the cloud-runtime
+ * system-prompt addendum (CYPACK-1266) so both features share one signal.
+ */
+const CLOUD_RUNTIME_ENV = "CYRUS_CLOUD_RUNTIME";
+
+/**
+ * True when `CYRUS_CLOUD_RUNTIME` is set to a truthy value (`1` / `true` /
+ * `yes`, case-insensitive). Matches the truthiness rule used elsewhere for this
+ * same env var so the cloud gate behaves consistently across hooks.
+ */
+function isCloudRuntime(getEnv: (name: string) => string | undefined): boolean {
+	const raw = getEnv(CLOUD_RUNTIME_ENV);
+	if (!raw) return false;
+	const normalized = raw.trim().toLowerCase();
+	return normalized === "1" || normalized === "true" || normalized === "yes";
+}
 
 /** Injectable seams for {@link buildMemoryLimitHook} (for testing). */
 export interface MemoryLimitHookDeps {
@@ -31,7 +48,7 @@ export interface MemoryLimitHookDeps {
  * gating and the SDK input/output plumbing.
  *
  * The hook is a **strict no-op** (input unchanged) unless ALL of:
- *   - `CYRUS_RUNTIME === "cloud"` (explicit cloud gate — replaces any probe),
+ *   - `CYRUS_CLOUD_RUNTIME` is truthy (explicit cloud gate — replaces any probe),
  *   - `CYRUS_TOOL_MEMORY_MAX_MB` is set (the per-tier budget), and
  *   - the wrapper binary exists on disk (deploy-order-independence guard).
  *
@@ -57,7 +74,7 @@ export function buildMemoryLimitHook(
 
 							// Gates — any failure means leave the command untouched.
 							const cap = getEnv(MEMORY_MAX_MB_ENV);
-							if (getEnv(RUNTIME_ENV) !== "cloud" || !cap || !wrapperExists()) {
+							if (!isCloudRuntime(getEnv) || !cap || !wrapperExists()) {
 								return { continue: true };
 							}
 

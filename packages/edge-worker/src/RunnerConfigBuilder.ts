@@ -277,8 +277,8 @@ export class RunnerConfigBuilder {
 		const prMarkerHook = buildPrMarkerHook(log);
 		const intentToAddHook = buildIntentToAddHook(log);
 		// Cloud-only per-Bash cgroup v2 memory budgeting (CYHOST-1012). Both
-		// hooks are no-ops unless CYRUS_RUNTIME=cloud, the budget env var is set,
-		// and the cyrus-tool-exec wrapper exists on the droplet image.
+		// hooks are no-ops unless CYRUS_CLOUD_RUNTIME is truthy, the budget env
+		// var is set, and the cyrus-tool-exec wrapper exists on the droplet image.
 		const memoryLimitHook = buildMemoryLimitHook(log);
 		const oomReportHook = buildOomReportHook(log);
 		const stopHook = this.buildStopHook(log);

@@ -19,7 +19,7 @@ function cloudEnv(
 	overrides: Record<string, string | undefined> = {},
 ): (name: string) => string | undefined {
 	const env: Record<string, string | undefined> = {
-		CYRUS_RUNTIME: "cloud",
+		CYRUS_CLOUD_RUNTIME: "true",
 		CYRUS_TOOL_MEMORY_MAX_MB: "1300",
 		...overrides,
 	};
@@ -63,13 +63,39 @@ describe("buildMemoryLimitHook — gating (no-op cases)", () => {
 		expect(matcher.matcher).toBe("Bash");
 	});
 
-	it("is a no-op when CYRUS_RUNTIME is not 'cloud'", async () => {
+	it("is a no-op when CYRUS_CLOUD_RUNTIME is unset", async () => {
 		const matcher = preMatcher({
-			getEnv: cloudEnv({ CYRUS_RUNTIME: undefined }),
+			getEnv: cloudEnv({ CYRUS_CLOUD_RUNTIME: undefined }),
 			wrapperExists: () => true,
 		});
 		const result = await runPre(matcher, makePreInput({ command: "ls" }));
 		expect(result).toEqual({ continue: true });
+	});
+
+	it("is a no-op when CYRUS_CLOUD_RUNTIME is falsy ('false')", async () => {
+		const matcher = preMatcher({
+			getEnv: cloudEnv({ CYRUS_CLOUD_RUNTIME: "false" }),
+			wrapperExists: () => true,
+		});
+		const result = await runPre(matcher, makePreInput({ command: "ls" }));
+		expect(result).toEqual({ continue: true });
+	});
+
+	it.each([
+		"true",
+		"TRUE",
+		"1",
+		"yes",
+		" Yes ",
+	])("fires when CYRUS_CLOUD_RUNTIME is truthy (%j)", async (value) => {
+		const matcher = preMatcher({
+			getEnv: cloudEnv({ CYRUS_CLOUD_RUNTIME: value }),
+			wrapperExists: () => true,
+		});
+		const result = await runPre(matcher, makePreInput({ command: "ls" }));
+		expect(result.hookSpecificOutput?.updatedInput?.command).toBe(
+			wrapCommand("ls", "1300"),
+		);
 	});
 
 	it("is a no-op when CYRUS_TOOL_MEMORY_MAX_MB is unset", async () => {
