@@ -28,6 +28,7 @@ Instead:
 - Tell the user to visit https://app.atcyrus.com/settings/packages and add the
   required \`apt\` or \`npm\` package(s) there.
 - Name the exact package(s) you need and briefly explain why.
+- Inform the user that after they have installed the packages, they may reprompt in order to continue the work, unblocked.
 - Continue with any work you can complete without the missing package, and
   clearly call out what remains blocked until they install it.
 </cloud_runtime_packages>
