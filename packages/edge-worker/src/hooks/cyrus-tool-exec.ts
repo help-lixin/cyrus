@@ -7,9 +7,10 @@
  * EdgeWorker hooks depend on this contract from opposite ends:
  *   - {@link buildMemoryLimitHook} (PreToolUse) *wraps* a command via
  *     {@link wrapCommand}.
- *   - the OOM report hook (PostToolUse) *detects* {@link OOM_MARKER}, parses it
- *     via {@link parseOomMarker}, and derives a privacy-safe program label via
- *     {@link extractProgramName}.
+ *   - the OOM report hook (PostToolUseFailure) *detects* {@link OOM_MARKER},
+ *     parses it via {@link parseOomMarker}, derives a program label via
+ *     {@link extractProgramName}, and recovers the full command via
+ *     {@link unwrapCommand}.
  *
  * Keeping the wrapped-command format, env-var name, binary path and marker in
  * one place means the producing and consuming hooks can never drift apart.
@@ -62,12 +63,12 @@ export function wrapCommand(command: string, capMb: string): string {
 
 /**
  * Strip the {@link wrapCommand} prefix, returning the inner command the user
- * actually asked to run (input unchanged when it isn't wrapped). Internal — at
- * PostToolUse time the command has already been rewritten to
+ * actually asked to run (input unchanged when it isn't wrapped). At
+ * PostToolUseFailure time the command has already been rewritten to
  * `<env> cyrus-tool-exec '<original>'`, so we must peel the wrapper off to see
- * the real command instead of our own boilerplate.
+ * (and report) the real command instead of our own boilerplate.
  */
-function unwrapCommand(command: string): string {
+export function unwrapCommand(command: string): string {
 	if (!WRAPPER_PREFIX_RE.test(command)) {
 		return command;
 	}
@@ -82,15 +83,72 @@ function unwrapCommand(command: string): string {
 const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /**
- * Derive a privacy-safe label for a (possibly wrapped) command: the basename of
- * the program being executed, with **no arguments and no leading `VAR=value`
- * env assignments**. This is deliberately conservative for telemetry leaving the
- * box (SOC-2): command arguments and inline env assignments are exactly where
- * secrets live — API tokens, connection strings, `KEY=...` prefixes — so we
- * never ship them off the droplet. We send only *what* ran, not *how* it ran.
+ * Directory-change builtins that consume the *rest of their `&&`/`;` segment*:
+ * `cd /path` runs no program of interest, so the real program lives in the next
+ * segment (e.g. `cd …/rust-analyzer && cargo build` → `cargo`, not `cd`).
+ */
+const SEGMENT_SKIP_BUILTINS = new Set(["cd", "pushd", "popd"]);
+
+/**
+ * Exec wrappers that prefix the *same* segment: they take their own flags and
+ * `VAR=value` assignments, then hand off to the real program in the same
+ * segment (e.g. `/usr/bin/time -v cargo build` → `cargo`; `env FOO=1 node` →
+ * `node`). We skip the wrapper and its leading flags to reach the program.
+ */
+const EXEC_WRAPPER_BUILTINS = new Set([
+	"env",
+	"time",
+	"nice",
+	"nohup",
+	"exec",
+	"command",
+	"stdbuf",
+	"setsid",
+]);
+
+/** Find the program token in one `&&`/`;`-delimited segment, or "" if none. */
+function programInSegment(segment: string): string {
+	const tokens = segment.trim().split(/\s+/).filter(Boolean);
+	let i = 0;
+	while (i < tokens.length) {
+		// Skip leading `VAR=value` env assignments (inline env / secrets).
+		if (ENV_ASSIGNMENT_RE.test(tokens[i] as string)) {
+			i++;
+			continue;
+		}
+		const base =
+			(tokens[i] as string).split("/").pop() ?? (tokens[i] as string);
+		// A bare `cd /path` segment has no program of interest — defer to the
+		// next segment.
+		if (SEGMENT_SKIP_BUILTINS.has(base)) {
+			return "";
+		}
+		// `env`/`time`/… prefix the program: skip the wrapper plus its own flags,
+		// then keep scanning for the real program in this same segment.
+		if (EXEC_WRAPPER_BUILTINS.has(base)) {
+			i++;
+			while (i < tokens.length && (tokens[i] as string).startsWith("-")) {
+				i++;
+			}
+			continue;
+		}
+		return base;
+	}
+	return "";
+}
+
+/**
+ * Derive a best-effort program label for a (possibly wrapped) command: the
+ * basename of the program actually being executed, with no arguments. Leading
+ * `VAR=value` env assignments, `cd …/` directory changes, and exec wrappers
+ * (`env`, `/usr/bin/time -v`, `nice`, …) are stripped so the label names the
+ * real binary rather than shell boilerplate. Used for aggregation only — the
+ * full command is reported separately.
  *
  *   `pnpm test --token=abc`                          -> `pnpm`
  *   `AWS_SECRET_ACCESS_KEY=… node build.js`          -> `node`
+ *   `cd …/rust-analyzer && cargo build --release`    -> `cargo`
+ *   `/usr/bin/time -v cargo build`                   -> `cargo`
  *   `<env> cyrus-tool-exec 'SECRET=x ./bin/run -k y'`-> `run`
  *
  * Returns "" when no program token can be identified.
@@ -98,34 +156,47 @@ const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 export function extractProgramName(command: string, max = 64): string {
 	const inner = unwrapCommand(command);
 	const firstLine = inner.split("\n", 1)[0] ?? "";
-	const tokens = firstLine.trim().split(/\s+/).filter(Boolean);
-	// Skip leading `VAR=value` env assignments; the first remaining token is the
-	// program being run.
-	const program = tokens.find((token) => !ENV_ASSIGNMENT_RE.test(token)) ?? "";
-	const basename = program.split("/").pop() ?? program;
-	return basename.slice(0, max);
+	// Split on shell sequencing operators; the first segment with a real program
+	// wins (so a leading `cd …` segment is skipped).
+	for (const segment of firstLine.split(/&&|\|\||;/)) {
+		const program = programInSegment(segment);
+		if (program) {
+			return program.slice(0, max);
+		}
+	}
+	return "";
 }
 
 /** Numbers parsed from an {@link OOM_MARKER} line; every field is best-effort. */
 export interface ParsedOomMarker {
 	budgetMb?: number;
 	peakBytes?: number;
+	/**
+	 * Number of OOM kills recorded for the cgroup, parsed from an optional
+	 * `oom_kill <n>` token the wrapper may append (e.g. `… (peak <bytes> bytes,
+	 * oom_kill 2).`). Omitted when the wrapper doesn't emit it.
+	 */
+	oomKillCount?: number;
 }
 
 /**
- * Extract the memory budget (`exceeded <cap>M`) and peak usage
- * (`peak <bytes> bytes`) from text containing the OOM marker. A field is
- * omitted when its token isn't found.
+ * Extract the memory budget (`exceeded <cap>M`), peak usage (`peak <bytes>
+ * bytes`), and an optional OOM-kill count (`oom_kill <n>`) from text containing
+ * the OOM marker. A field is omitted when its token isn't found.
  */
 export function parseOomMarker(text: string): ParsedOomMarker {
 	const capMatch = text.match(/exceeded\s+(\d+)M/);
 	const peakMatch = text.match(/peak\s+(\d+)\s+bytes/);
+	const oomKillMatch = text.match(/oom_kill\s+(\d+)/);
 	const result: ParsedOomMarker = {};
 	if (capMatch) {
 		result.budgetMb = Number(capMatch[1]);
 	}
 	if (peakMatch) {
 		result.peakBytes = Number(peakMatch[1]);
+	}
+	if (oomKillMatch) {
+		result.oomKillCount = Number(oomKillMatch[1]);
 	}
 	return result;
 }

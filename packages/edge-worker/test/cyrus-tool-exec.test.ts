@@ -4,6 +4,7 @@ import {
 	OOM_MARKER,
 	parseOomMarker,
 	singleQuote,
+	unwrapCommand,
 	wrapCommand,
 } from "../src/hooks/cyrus-tool-exec.js";
 
@@ -49,9 +50,41 @@ describe("wrapCommand", () => {
 	});
 });
 
+describe("unwrapCommand", () => {
+	it("returns an unwrapped command unchanged", () => {
+		expect(unwrapCommand("pnpm test")).toBe("pnpm test");
+	});
+
+	it("peels the wrapper prefix and restores the original verbatim", () => {
+		const inner = "TOKEN=shh ./deploy.sh --key abc";
+		expect(unwrapCommand(wrapCommand(inner, "1300"))).toBe(inner);
+	});
+
+	it("restores embedded single quotes and newlines (heredocs)", () => {
+		const inner = "cat <<'EOF'\nit's a line\nEOF";
+		expect(unwrapCommand(wrapCommand(inner, "3000"))).toBe(inner);
+	});
+});
+
 describe("extractProgramName", () => {
 	it("returns the program name from a plain command", () => {
 		expect(extractProgramName("pnpm test --filter x")).toBe("pnpm");
+	});
+
+	it("skips a leading `cd …` segment and returns the real program", () => {
+		expect(
+			extractProgramName(
+				"cd /home/user/rust-analyzer && cargo build --release",
+			),
+		).toBe("cargo");
+	});
+
+	it("skips an exec wrapper and its flags (/usr/bin/time -v)", () => {
+		expect(extractProgramName("/usr/bin/time -v cargo build")).toBe("cargo");
+	});
+
+	it("skips `env` plus inline assignments to reach the program", () => {
+		expect(extractProgramName("env FOO=1 node app.js")).toBe("node");
 	});
 
 	it("peels the wrapper prefix and returns the inner program", () => {
@@ -97,6 +130,20 @@ describe("parseOomMarker", () => {
 			budgetMb: 1300,
 			peakBytes: 1500000000,
 		});
+	});
+
+	it("parses an optional oom_kill count when present", () => {
+		const line = `${OOM_MARKER} exceeded 3000M memory budget (peak 3145728000 bytes, oom_kill 2).`;
+		expect(parseOomMarker(line)).toEqual({
+			budgetMb: 3000,
+			peakBytes: 3145728000,
+			oomKillCount: 2,
+		});
+	});
+
+	it("omits oomKillCount when the marker doesn't carry it", () => {
+		const line = `${OOM_MARKER} exceeded 1300M memory budget (peak 1500000000 bytes).`;
+		expect(parseOomMarker(line).oomKillCount).toBeUndefined();
 	});
 
 	it("returns an empty object when nothing matches", () => {

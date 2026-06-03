@@ -18,6 +18,12 @@ export interface IssueMinimal {
 	title: string;
 	description?: string;
 	branchName: string;
+	/**
+	 * Canonical issue URL (e.g. the Linear issue link). Optional because
+	 * lightweight/non-Linear sessions (GitHub/GitLab PR contexts) don't carry
+	 * one. Populated for Linear issues so downstream telemetry can link back.
+	 */
+	url?: string;
 }
 
 /**

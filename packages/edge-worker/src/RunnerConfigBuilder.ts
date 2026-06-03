@@ -272,29 +272,17 @@ export class RunnerConfigBuilder {
 		const log = input.logger;
 
 		// Configure hooks: PostToolUse for screenshot tools + PR-marker enforcement,
-		// plus the Stop hook that blocks the session when work is unshipped.
+		// plus the Stop hook that blocks the session when work is unshipped. The
+		// cloud-only OOM report hook is assembled later (below), once runnerType
+		// and the final model are known, so it can carry them in its report.
 		const screenshotHooks = this.buildScreenshotHooks(log);
 		const prMarkerHook = buildPrMarkerHook(log);
 		const intentToAddHook = buildIntentToAddHook(log);
 		// Cloud-only per-Bash cgroup v2 memory budgeting (CYHOST-1012). Both
 		// hooks are no-ops unless CYRUS_CLOUD_RUNTIME is truthy, the budget env
 		// var is set, and the cyrus-tool-exec wrapper exists on the droplet image.
-		// The OOM report hook registers on PostToolUseFailure: an OOM-killed
-		// command exits non-zero, so its result is routed to the failure event,
-		// never to (successful) PostToolUse.
 		const memoryLimitHook = buildMemoryLimitHook(log);
-		const oomReportHook = buildOomReportHook(log);
 		const stopHook = this.buildStopHook(log);
-		const hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {
-			...stopHook,
-			PreToolUse: [...(memoryLimitHook.PreToolUse ?? [])],
-			PostToolUse: [
-				...(screenshotHooks.PostToolUse ?? []),
-				...(prMarkerHook.PostToolUse ?? []),
-				...(intentToAddHook.PostToolUse ?? []),
-			],
-			PostToolUseFailure: [...(oomReportHook.PostToolUseFailure ?? [])],
-		};
 
 		// Determine runner type and model override from selectors
 		const runnerSelection = this.runnerSelector.determineRunnerSelection(
@@ -338,6 +326,46 @@ export class RunnerConfigBuilder {
 			modelOverride ||
 			input.repository.model ||
 			this.runnerSelector.getDefaultModelForRunner(runnerType);
+
+		// Cloud-only OOM report hook (CYHOST-1012). Registers on
+		// PostToolUseFailure: an OOM-killed command exits non-zero, so its result
+		// is routed to the failure event, never to (successful) PostToolUse. We
+		// thread in the session/issue/runner context so each report says which
+		// session, issue, runner, and model OOM'd. `runnerSessionId` is read
+		// lazily — the Claude session id isn't assigned until after the runner
+		// starts, well after this config is built — so we pass a getter that reads
+		// the (mutated-in-place) session object at report time.
+		const oomReportHook = buildOomReportHook(log, undefined, {
+			sessionId: input.session.id,
+			sessionSource: input.session.issueContext?.trackerId ?? "linear",
+			runnerType,
+			model: finalModel,
+			workspacePath: input.session.workspace.path,
+			linearIssueId:
+				input.session.issueContext?.issueId ??
+				input.session.issue?.id ??
+				input.session.issueId,
+			linearIssueIdentifier:
+				input.session.issueContext?.issueIdentifier ??
+				input.session.issue?.identifier,
+			linearIssueUrl: input.session.issue?.url,
+			getRunnerSessionId: () =>
+				input.session.claudeSessionId ??
+				input.session.geminiSessionId ??
+				input.session.codexSessionId ??
+				input.session.cursorSessionId,
+		});
+
+		const hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {
+			...stopHook,
+			PreToolUse: [...(memoryLimitHook.PreToolUse ?? [])],
+			PostToolUse: [
+				...(screenshotHooks.PostToolUse ?? []),
+				...(prMarkerHook.PostToolUse ?? []),
+				...(intentToAddHook.PostToolUse ?? []),
+			],
+			PostToolUseFailure: [...(oomReportHook.PostToolUseFailure ?? [])],
+		};
 
 		const resolvedWorkspaceId =
 			input.linearWorkspaceId ??

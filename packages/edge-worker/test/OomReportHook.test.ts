@@ -103,7 +103,7 @@ describe("buildOomReportHook", () => {
 		expect(reporter.events).toHaveLength(0);
 	});
 
-	it("reports a parsed event from the `error` field with the program name only", async () => {
+	it("reports the full command, a program label, and exit code from `error`", async () => {
 		const reporter = recordingReporter();
 		await runPost(
 			postMatcher(reporter),
@@ -111,9 +111,11 @@ describe("buildOomReportHook", () => {
 		);
 		expect(reporter.events).toEqual([
 			{
+				command: "pnpm run heavy",
+				program: "pnpm",
 				budgetMb: 1300,
 				peakBytes: 1500000000,
-				commandExcerpt: "pnpm",
+				exitCode: 137,
 			},
 		]);
 	});
@@ -127,20 +129,84 @@ describe("buildOomReportHook", () => {
 		} as unknown as PostToolUseFailureHookInput;
 		await runPost(postMatcher(reporter), input);
 		expect(reporter.events[0]).toMatchObject({
+			command: "node server.js",
+			program: "node",
 			budgetMb: 1300,
 			peakBytes: 1500000000,
-			commandExcerpt: "node",
+			exitCode: 137,
 		});
 	});
 
-	it("sends only the program name, never wrapper prefix or secret-bearing args", async () => {
+	it("sends the ENTIRE unwrapped command untruncated, plus a safe program label", async () => {
 		const reporter = recordingReporter();
-		const wrapped = wrapCommand("TOKEN=shh ./deploy.sh --key abc", "1300");
+		// The full command — including args — is reported so OOMs are debuggable;
+		// the program label stays argument-free for aggregation.
+		const inner = "TOKEN=shh ./deploy.sh --key abc";
+		const wrapped = wrapCommand(inner, "1300");
 		await runPost(
 			postMatcher(reporter),
 			makeFailureInput(MARKER_TEXT, wrapped),
 		);
-		expect(reporter.events[0].commandExcerpt).toBe("deploy.sh");
+		expect(reporter.events[0].command).toBe(inner);
+		expect(reporter.events[0].program).toBe("deploy.sh");
+	});
+
+	it("reports oomKillCount when the marker carries it", async () => {
+		const reporter = recordingReporter();
+		const marker = `${OOM_MARKER} exceeded 1300M memory budget (peak 1500000000 bytes, oom_kill 3).`;
+		await runPost(
+			postMatcher(reporter),
+			makeFailureInput(marker, "cargo build"),
+		);
+		expect(reporter.events[0].oomKillCount).toBe(3);
+	});
+
+	it("enriches the report with session/issue/runner context", async () => {
+		const reporter = recordingReporter();
+		const hook = buildOomReportHook(silentLogger, reporter, {
+			sessionId: "sess-1",
+			sessionSource: "linear",
+			runnerType: "claude",
+			model: "claude-opus-4-8",
+			workspacePath: "/work/tree",
+			linearIssueId: "issue-uuid",
+			linearIssueIdentifier: "CYPACK-1274",
+			linearIssueUrl: "https://linear.app/ceedar/issue/CYPACK-1274",
+			getRunnerSessionId: () => "claude-sess-9",
+		});
+		const matcher = hook.PostToolUseFailure?.[0];
+		if (!matcher) throw new Error("expected a PostToolUseFailure matcher");
+		await runPost(matcher, makeFailureInput(MARKER_TEXT, "cargo build"));
+		expect(reporter.events[0]).toEqual({
+			command: "cargo build",
+			program: "cargo",
+			budgetMb: 1300,
+			peakBytes: 1500000000,
+			exitCode: 137,
+			sessionId: "sess-1",
+			sessionSource: "linear",
+			runnerSessionId: "claude-sess-9",
+			runnerType: "claude",
+			model: "claude-opus-4-8",
+			linearIssueId: "issue-uuid",
+			linearIssueIdentifier: "CYPACK-1274",
+			linearIssueUrl: "https://linear.app/ceedar/issue/CYPACK-1274",
+			workspacePath: "/work/tree",
+		});
+	});
+
+	it("reads runnerSessionId lazily, at report time (not build time)", async () => {
+		const reporter = recordingReporter();
+		let runnerSessionId: string | undefined;
+		const hook = buildOomReportHook(silentLogger, reporter, {
+			getRunnerSessionId: () => runnerSessionId,
+		});
+		const matcher = hook.PostToolUseFailure?.[0];
+		if (!matcher) throw new Error("expected a PostToolUseFailure matcher");
+		// Assigned only after the hook is built — mirrors claude_session_id_assigned.
+		runnerSessionId = "assigned-late";
+		await runPost(matcher, makeFailureInput(MARKER_TEXT, "cargo build"));
+		expect(reporter.events[0].runnerSessionId).toBe("assigned-late");
 	});
 
 	it("fails open (returns {}) when the reporter throws", async () => {
@@ -159,9 +225,11 @@ describe("buildOomReportHook", () => {
 
 describe("HttpOomEventReporter", () => {
 	const event: OomEvent = {
+		command: "pnpm run heavy --filter x",
+		program: "pnpm",
 		budgetMb: 1300,
 		peakBytes: 1500000000,
-		commandExcerpt: "pnpm run heavy",
+		exitCode: 137,
 	};
 
 	it("does not POST when CYRUS_API_KEY is missing", async () => {
@@ -189,9 +257,11 @@ describe("HttpOomEventReporter", () => {
 		expect(options.method).toBe("POST");
 		expect(options.headers.Authorization).toBe("Bearer secret-key");
 		expect(JSON.parse(options.body)).toEqual({
+			command: "pnpm run heavy --filter x",
+			program: "pnpm",
 			budgetMb: 1300,
 			peakBytes: 1500000000,
-			commandExcerpt: "pnpm run heavy",
+			exitCode: 137,
 		});
 	});
 

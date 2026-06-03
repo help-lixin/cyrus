@@ -10,18 +10,77 @@ import {
 	extractProgramName,
 	OOM_MARKER,
 	parseOomMarker,
+	unwrapCommand,
 } from "./cyrus-tool-exec.js";
 
-/** A per-command OOM event, ready to report to the control plane. */
+/** Exit code of an OOM-killed process (128 + SIGKILL/9). */
+const OOM_EXIT_CODE = 137;
+
+/**
+ * A per-command OOM event, ready to report to the control plane. Mirrors the
+ * wire shape accepted by `POST /api/oom-event` (CYHOST-1012). `team_id`,
+ * `droplet_id`, and `tier` are intentionally absent — the endpoint derives them
+ * server-side from the droplet's bearer key.
+ */
 export interface OomEvent {
+	/**
+	 * The **entire** command that was OOM-killed, unwrapped (wrapper prefix
+	 * stripped) and **untruncated**. This is what makes a report actionable —
+	 * an earlier program-only excerpt logged `cd` for
+	 * `cd …/rust-analyzer && cargo build`, which is useless for debugging.
+	 */
+	command: string;
+	/**
+	 * Best-effort program basename for aggregation (e.g. `cargo`), with leading
+	 * `cd …`, env assignments, and exec wrappers stripped. See
+	 * {@link extractProgramName}.
+	 */
+	program: string;
 	budgetMb?: number;
 	peakBytes?: number;
-	/**
-	 * Privacy-safe identifier of the program that OOM'd — the executable name
-	 * only, never arguments or env assignments (see {@link extractProgramName}).
-	 * Carried in the control-plane wire field `commandExcerpt`.
-	 */
-	commandExcerpt: string;
+	/** Process exit code — always {@link OOM_EXIT_CODE} for an OOM kill. */
+	exitCode?: number;
+	/** OOM-kill count parsed from the marker, when the wrapper emits it. */
+	oomKillCount?: number;
+	/** Cyrus agent-session id. */
+	sessionId?: string;
+	/** Originating platform, e.g. `"linear"`. */
+	sessionSource?: string;
+	/** Underlying runner session id (e.g. the Claude session id), if assigned. */
+	runnerSessionId?: string;
+	/** Runner type, e.g. `"claude"`. */
+	runnerType?: string;
+	/** Model in use, e.g. `"claude-opus-4-8"`. */
+	model?: string;
+	/** Customer Linear issue id. */
+	linearIssueId?: string;
+	/** Customer Linear issue identifier, e.g. `"CYPACK-1274"`. */
+	linearIssueIdentifier?: string;
+	/** Customer Linear issue URL. */
+	linearIssueUrl?: string;
+	/** Session worktree path on the droplet. */
+	workspacePath?: string;
+}
+
+/**
+ * Static session/issue/runner context available when the hook is built. Threaded
+ * in by {@link RunnerConfigBuilder} so each OOM report carries which session,
+ * issue, runner, and model produced it.
+ *
+ * `getRunnerSessionId` is a **getter**, not a value: the runner session id
+ * (Claude session id) isn't known until the SDK emits `claude_session_id_assigned`
+ * — well after the hook is constructed — so it must be read lazily at report time.
+ */
+export interface OomReportContext {
+	sessionId?: string;
+	sessionSource?: string;
+	runnerType?: string;
+	model?: string;
+	workspacePath?: string;
+	linearIssueId?: string;
+	linearIssueIdentifier?: string;
+	linearIssueUrl?: string;
+	getRunnerSessionId?: () => string | undefined;
 }
 
 /**
@@ -88,9 +147,21 @@ export class HttpOomEventReporter implements OomEventReporter {
 					"Content-Type": "application/json",
 				},
 				body: JSON.stringify({
+					command: event.command,
+					program: event.program,
 					budgetMb: event.budgetMb,
 					peakBytes: event.peakBytes,
-					commandExcerpt: event.commandExcerpt,
+					exitCode: event.exitCode,
+					oomKillCount: event.oomKillCount,
+					sessionId: event.sessionId,
+					sessionSource: event.sessionSource,
+					runnerSessionId: event.runnerSessionId,
+					runnerType: event.runnerType,
+					model: event.model,
+					linearIssueId: event.linearIssueId,
+					linearIssueIdentifier: event.linearIssueIdentifier,
+					linearIssueUrl: event.linearIssueUrl,
+					workspacePath: event.workspacePath,
 				}),
 				signal: controller.signal,
 			});
@@ -98,7 +169,7 @@ export class HttpOomEventReporter implements OomEventReporter {
 				this.log.debug(`[OomReportHook] /api/oom-event returned ${res.status}`);
 			} else {
 				this.log.info(
-					`[OomReportHook] reported OOM (budget=${event.budgetMb}M peak=${event.peakBytes}B)`,
+					`[OomReportHook] reported OOM (program=${event.program} budget=${event.budgetMb}M peak=${event.peakBytes}B)`,
 				);
 			}
 		} catch (err) {
@@ -146,9 +217,10 @@ export function extractResultText(toolResponse: unknown): string {
  * OOM-killed command exits non-zero, so the SDK routes its result to the
  * failure event — the {@link OOM_MARKER} can therefore never appear in a
  * (successful) `PostToolUse` result. The hook's sole responsibility is to
- * detect the marker, parse it, and hand a structured {@link OomEvent} to the
- * injected {@link OomEventReporter} — delivery details (auth, URL, timeout,
- * fail-open) live in the reporter.
+ * detect the marker, parse it, enrich it with the injected {@link
+ * OomReportContext}, and hand a structured {@link OomEvent} to the injected
+ * {@link OomEventReporter} — delivery details (auth, URL, timeout, fail-open)
+ * live in the reporter.
  *
  * On `PostToolUseFailure` the failure detail lives in `error` (a string). We
  * also fold in any `tool_response` if a future SDK surfaces one, so the marker
@@ -157,6 +229,7 @@ export function extractResultText(toolResponse: unknown): string {
 export function buildOomReportHook(
 	log: ILogger,
 	reporter: OomEventReporter = new HttpOomEventReporter(log),
+	context: OomReportContext = {},
 ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
 	return {
 		PostToolUseFailure: [
@@ -175,16 +248,29 @@ export function buildOomReportHook(
 								return {};
 							}
 
-							const { budgetMb, peakBytes } = parseOomMarker(text);
-							const command =
+							const { budgetMb, peakBytes, oomKillCount } =
+								parseOomMarker(text);
+							const rawCommand =
 								(post.tool_input as { command?: unknown } | undefined)
 									?.command ?? "";
+							const command = typeof rawCommand === "string" ? rawCommand : "";
 							await reporter.report({
+								// Full original command, wrapper stripped, untruncated.
+								command: unwrapCommand(command),
+								program: extractProgramName(command),
 								budgetMb,
 								peakBytes,
-								commandExcerpt: extractProgramName(
-									typeof command === "string" ? command : "",
-								),
+								exitCode: OOM_EXIT_CODE,
+								oomKillCount,
+								sessionId: context.sessionId,
+								sessionSource: context.sessionSource,
+								runnerSessionId: context.getRunnerSessionId?.(),
+								runnerType: context.runnerType,
+								model: context.model,
+								linearIssueId: context.linearIssueId,
+								linearIssueIdentifier: context.linearIssueIdentifier,
+								linearIssueUrl: context.linearIssueUrl,
+								workspacePath: context.workspacePath,
 							});
 						} catch (err) {
 							log.debug(

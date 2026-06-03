@@ -1535,6 +1535,7 @@ ${reply.body}
 			title: issue.title || "",
 			description: issue.description || undefined,
 			branchName: issue.branchName, // Use the real branchName property!
+			url: issue.url,
 		};
 	}
 

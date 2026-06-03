@@ -4,6 +4,9 @@ This changelog documents internal development changes, refactors, tooling update
 
 ## [Unreleased]
 
+### Changed
+- Cloud per-Bash OOM telemetry now reports the **entire** OOM-killing command (unwrapped, untruncated) instead of a leading-program excerpt — an earlier excerpt logged `cd` for `cd …/rust-analyzer && cargo build`, which was useless for debugging. Each report is also enriched with session/issue/runner context (`program`, `exitCode`, `oomKillCount`, `sessionId`, `sessionSource`, `runnerSessionId`, `runnerType`, `model`, `linearIssueId`/`linearIssueIdentifier`/`linearIssueUrl`, `workspacePath`) matching the `POST /api/oom-event` contract; `team_id`/`droplet_id`/`tier` stay server-derived. `program` is now wrapper-aware (strips `cd …`, `env`, `/usr/bin/time -v` prefixes so `cd X && cargo build` → `cargo`). Cloud-only; no effect on self-host or community installs. ([CYPACK-1274](https://linear.app/ceedar/issue/CYPACK-1274), [#1280](https://github.com/cyrusagents/cyrus/pull/1280))
+
 ## [0.2.60] - 2026-05-28
 
 _No internal-only changes._
