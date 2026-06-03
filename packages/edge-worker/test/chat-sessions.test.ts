@@ -1,7 +1,10 @@
 import { join } from "node:path";
 import { getReadOnlyTools } from "cyrus-claude-runner";
 import type { RepositoryConfig } from "cyrus-core";
-import { SlackMessageService } from "cyrus-slack-event-transport";
+import {
+	SlackMessageService,
+	SlackReactionService,
+} from "cyrus-slack-event-transport";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatRepositoryProvider } from "../src/ChatRepositoryProvider.js";
 import { LiveChatRepositoryProvider } from "../src/ChatRepositoryProvider.js";
@@ -10,6 +13,8 @@ import { ChatSessionHandler } from "../src/ChatSessionHandler.js";
 import type { RunnerConfigBuilder } from "../src/RunnerConfigBuilder.js";
 import {
 	BEHAVIOURS_PAGE_ROUTE,
+	PROCESSED_REACTION,
+	RECEIPT_REACTION,
 	SLACK_NO_RESPONSE_SENTINEL,
 	SlackChatAdapter,
 } from "../src/SlackChatAdapter.js";
@@ -216,6 +221,126 @@ describe("ChatSessionHandler session-initiation gate", () => {
 	});
 });
 
+describe("ChatSessionHandler processed acknowledgement", () => {
+	it("calls acknowledgeProcessed when the runner emits a result", async () => {
+		const adapter: ChatPlatformAdapter<TestEvent> = new TestChatAdapter(
+			"ack-thread",
+		);
+		const acknowledgeProcessed = vi.fn().mockResolvedValue(undefined);
+		adapter.acknowledgeProcessed = acknowledgeProcessed;
+
+		let capturedConfig: any;
+		const createRunner = vi.fn((config: any) => {
+			capturedConfig = config;
+			return {
+				supportsStreamingInput: false,
+				start: vi.fn().mockResolvedValue({ sessionId: "session-1" }),
+				stop: vi.fn(),
+				isRunning: vi.fn().mockReturnValue(false),
+				isStreaming: vi.fn().mockReturnValue(false),
+				addStreamMessage: vi.fn(),
+				getMessages: vi.fn().mockReturnValue([]),
+			} as any;
+		});
+		const handler = new ChatSessionHandler(adapter, {
+			cyrusHome: TEST_CYRUS_CHAT,
+			chatRepositoryProvider: createStaticProvider([]),
+			runnerConfigBuilder: createMockRunnerConfigBuilder(),
+			createRunner,
+			onWebhookStart: vi.fn(),
+			onWebhookEnd: vi.fn(),
+			onStateChange: vi.fn().mockResolvedValue(undefined),
+			onClaudeError: vi.fn(),
+		});
+
+		const event = { eventId: "mention", threadKey: "ack-thread" };
+		await handler.handleEvent(event as any);
+		expect(capturedConfig?.onMessage).toBeDefined();
+
+		await capturedConfig.onMessage({
+			type: "result",
+			subtype: "success",
+			is_error: false,
+			result: "done",
+			session_id: "session-1",
+		});
+		// acknowledgeProcessed is fire-and-forget — let the microtask settle
+		await new Promise((resolve) => setImmediate(resolve));
+
+		expect(acknowledgeProcessed).toHaveBeenCalledTimes(1);
+		expect(acknowledgeProcessed).toHaveBeenCalledWith(event);
+	});
+
+	it("acknowledges every queued message even when the agent merges them into fewer turns", async () => {
+		const adapter: ChatPlatformAdapter<TestEvent> = new TestChatAdapter(
+			"burst-thread",
+		);
+		const acknowledgeProcessed = vi.fn().mockResolvedValue(undefined);
+		adapter.acknowledgeProcessed = acknowledgeProcessed;
+		const postReply = vi
+			.spyOn(adapter, "postReply")
+			.mockResolvedValue(undefined);
+
+		let capturedConfig: any;
+		const createRunner = vi.fn((config: any) => {
+			capturedConfig = config;
+			return {
+				supportsStreamingInput: false,
+				start: vi.fn().mockResolvedValue({ sessionId: "session-1" }),
+				stop: vi.fn(),
+				// Running and streaming, so quick-succession follow-ups are
+				// injected into the live session via addStreamMessage.
+				isRunning: vi.fn().mockReturnValue(true),
+				isStreaming: vi.fn().mockReturnValue(true),
+				addStreamMessage: vi.fn(),
+				getMessages: vi.fn().mockReturnValue([]),
+			} as any;
+		});
+		const handler = new ChatSessionHandler(adapter, {
+			cyrusHome: TEST_CYRUS_CHAT,
+			chatRepositoryProvider: createStaticProvider([]),
+			runnerConfigBuilder: createMockRunnerConfigBuilder(),
+			createRunner,
+			onWebhookStart: vi.fn(),
+			onWebhookEnd: vi.fn(),
+			onStateChange: vi.fn().mockResolvedValue(undefined),
+			onClaudeError: vi.fn(),
+		});
+
+		// Three messages in quick succession: "Hi", "How are you?", "weather?"
+		const eventA = { eventId: "msg-a", threadKey: "burst-thread" };
+		const eventB = { eventId: "msg-b", threadKey: "burst-thread" };
+		const eventC = { eventId: "msg-c", threadKey: "burst-thread" };
+		await handler.handleEvent(eventA as any);
+		await handler.handleEvent(eventB as any);
+		await handler.handleEvent(eventC as any);
+
+		const result = {
+			type: "result",
+			subtype: "success",
+			is_error: false,
+			result: "done",
+			session_id: "session-1",
+		};
+		// The agent merges the queued prompts: 3 messages, only 2 results.
+		await capturedConfig.onMessage(result);
+		await capturedConfig.onMessage(result);
+		await new Promise((resolve) => setImmediate(resolve));
+
+		// Every message gets its reaction swapped — none left with stale 👀.
+		expect(acknowledgeProcessed).toHaveBeenCalledTimes(3);
+		expect(acknowledgeProcessed).toHaveBeenCalledWith(eventA);
+		expect(acknowledgeProcessed).toHaveBeenCalledWith(eventB);
+		expect(acknowledgeProcessed).toHaveBeenCalledWith(eventC);
+
+		// Both turn replies are posted: the first against the first queued
+		// event, the second via the remembered last event (queue already drained).
+		expect(postReply).toHaveBeenCalledTimes(2);
+		expect(postReply.mock.calls[0]?.[0]).toBe(eventA);
+		expect(postReply.mock.calls[1]?.[0]).toBe(eventC);
+	});
+});
+
 describe("SlackChatAdapter session initiation", () => {
 	it("treats app_mention as session-initiating", () => {
 		const adapter = new SlackChatAdapter(createStaticProvider([]));
@@ -297,6 +422,22 @@ describe("SlackChatAdapter responding policy", () => {
 		expect(postSpy).not.toHaveBeenCalled();
 	});
 
+	it("does NOT post leaked deliberation surrounding the no-response sentinel", async () => {
+		const adapter = new SlackChatAdapter(createStaticProvider([]));
+		const postSpy = vi
+			.spyOn(SlackMessageService.prototype, "postMessage")
+			.mockResolvedValue({} as any);
+
+		await adapter.postReply(
+			slackEvent("how are you?"),
+			runnerWithReply(
+				`The user didn't address me by name, so I should stay quiet.\n${SLACK_NO_RESPONSE_SENTINEL}`,
+			),
+		);
+
+		expect(postSpy).not.toHaveBeenCalled();
+	});
+
 	it("posts to Slack when the agent produces a real reply", async () => {
 		const adapter = new SlackChatAdapter(createStaticProvider([]));
 		const postSpy = vi
@@ -314,6 +455,35 @@ describe("SlackChatAdapter responding policy", () => {
 			text: "It memoizes the result.",
 			thread_ts: "1700000000.000100",
 		});
+	});
+
+	it("swaps the receipt reaction for the processed one after the turn completes", async () => {
+		const adapter = new SlackChatAdapter(createStaticProvider([]));
+		const addSpy = vi
+			.spyOn(SlackReactionService.prototype, "addReaction")
+			.mockResolvedValue(undefined);
+		const removeSpy = vi
+			.spyOn(SlackReactionService.prototype, "removeReaction")
+			.mockResolvedValue(undefined);
+
+		await adapter.acknowledgeProcessed(slackEvent("thanks team!"));
+
+		expect(removeSpy).toHaveBeenCalledTimes(1);
+		expect(removeSpy.mock.calls[0]?.[0]).toMatchObject({
+			channel: "C1",
+			timestamp: "1700000000.000200",
+			name: RECEIPT_REACTION,
+		});
+		expect(addSpy).toHaveBeenCalledTimes(1);
+		expect(addSpy.mock.calls[0]?.[0]).toMatchObject({
+			channel: "C1",
+			timestamp: "1700000000.000200",
+			name: PROCESSED_REACTION,
+		});
+		// Remove must precede add so both reactions are never visible together
+		expect(removeSpy.mock.invocationCallOrder[0]).toBeLessThan(
+			addSpy.mock.invocationCallOrder[0] ?? 0,
+		);
 	});
 });
 

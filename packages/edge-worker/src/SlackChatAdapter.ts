@@ -28,6 +28,12 @@ export const SLACK_NO_RESPONSE_SENTINEL = "<<NO_RESPONSE>>";
  */
 export const BEHAVIOURS_PAGE_ROUTE = "/settings/behaviours";
 
+/** Reaction added when a message is received and queued for processing (👀) */
+export const RECEIPT_REACTION = "eyes";
+
+/** Reaction that replaces the receipt one once the agent finished its turn (✅) */
+export const PROCESSED_REACTION = "white_check_mark";
+
 /**
  * Slack implementation of ChatPlatformAdapter.
  *
@@ -159,7 +165,7 @@ ${repositoryPaths.map((path) => `- ${path}`).join("\n")}
 ## Stopping Automatic Listening
 - If the user asks you to stop listening to, following, or responding in this thread:
   - Tell them automatic thread listening can be turned off on the Behaviours page: <${this.behavioursPageUrl}|Behaviours page>.
-  - From that point on, treat this thread as muted: stay silent (emit \`${SLACK_NO_RESPONSE_SENTINEL}\`) for every subsequent message until someone asks you a direct question — addressing you by name ("Cyrus, …") or with an @mention.`
+  - From that point on, treat this thread as muted: stay silent (emit \`${SLACK_NO_RESPONSE_SENTINEL}\` and nothing else) for every subsequent message until someone asks you a direct question — addressing you by name ("Cyrus, …") or with an @mention. When you resume responding, just answer — do not announce that you are listening again.`
 			: "";
 
 		return `You are participating in a Slack thread.
@@ -174,7 +180,8 @@ ${repositoryPaths.map((path) => `- ${path}`).join("\n")}
   1. The message asks a question you can genuinely and helpfully answer, OR
   2. Someone addresses you directly — by name ("Cyrus, …") or with an @mention.
 - For anything else — side conversation between people, acknowledgements ("thanks", "👍"), status chatter, or messages clearly not directed at you — do NOT reply.
-- When you should stay silent, output exactly \`${SLACK_NO_RESPONSE_SENTINEL}\` and nothing else. Do not explain why you're staying silent — just emit the token. (Emitting it is how you stay quiet; any other text gets posted to the thread.)
+- When you should stay silent, output exactly \`${SLACK_NO_RESPONSE_SENTINEL}\` and nothing else — no reasoning, no explanation, not a single word before or after the token.
+- NEVER narrate your decision about whether to respond. Your entire output is posted verbatim to the thread — there is no private scratchpad. Thoughts like "the user didn't address me by name, so I should stay quiet" or "they addressed me by name, so I'm listening again" must never appear in your output. Either emit the bare token, or reply directly to the user's message as if the decision never happened.
 - When you do respond, be genuinely helpful and concise.${stopListeningSection}
 
 ## Instructions
@@ -294,8 +301,12 @@ Supported mrkdwn syntax:
 
 			// The agent emits the no-response sentinel when it judged this message
 			// didn't warrant a reply (see the "When to Respond" system prompt
-			// section). Honor that by posting nothing.
-			if (summary.trim() === SLACK_NO_RESPONSE_SENTINEL) {
+			// section). Honor that by posting nothing. Deliberately a substring
+			// check, not an exact match: agents sometimes narrate their reasoning
+			// around the token despite being told not to, and that deliberation
+			// must never reach the thread — the token's presence anywhere means
+			// "do not post".
+			if (summary.includes(SLACK_NO_RESPONSE_SENTINEL)) {
 				this.logger.info(
 					`Slack agent opted not to respond in channel ${event.payload.channel} (no-response sentinel)`,
 				);
@@ -342,8 +353,37 @@ Supported mrkdwn syntax:
 			token,
 			channel: event.payload.channel,
 			timestamp: event.payload.ts,
-			name: "eyes",
+			name: RECEIPT_REACTION,
 		});
+	}
+
+	/**
+	 * Swap the receipt reaction (👀) for a processed one (✅) once the agent
+	 * has finished its turn for this message. This runs whether or not a reply
+	 * was posted, so users can tell a silently-skipped message was still seen.
+	 */
+	async acknowledgeProcessed(event: SlackWebhookEvent): Promise<void> {
+		const token = this.getSlackBotToken(event);
+		if (!token) {
+			this.logger.warn(
+				"Cannot update Slack reaction: no slackBotToken available (SLACK_BOT_TOKEN env var not set)",
+			);
+			return;
+		}
+
+		const reactionService = new SlackReactionService();
+		const target = {
+			token,
+			channel: event.payload.channel,
+			timestamp: event.payload.ts,
+		};
+
+		// Remove the receipt reaction before adding the processed one so the
+		// two are never visible together — the swap reads as a clean
+		// transition. (Slack has no atomic swap; if the add fails the message
+		// is briefly indicator-less, which beats showing both.)
+		await reactionService.removeReaction({ ...target, name: RECEIPT_REACTION });
+		await reactionService.addReaction({ ...target, name: PROCESSED_REACTION });
 	}
 
 	async notifyBusy(event: SlackWebhookEvent): Promise<void> {
