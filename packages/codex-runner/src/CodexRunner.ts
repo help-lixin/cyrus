@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
-	cpSync,
 	type Dirent,
 	existsSync,
 	lstatSync,
@@ -9,6 +8,7 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative as pathRelative } from "node:path";
@@ -696,10 +696,6 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 	}
 
 	private resolveManagedSkillsRoot(): string | undefined {
-		if (this.config.codexHome) {
-			return join(this.resolveCodexHome(), "skills");
-		}
-
 		const workingDirectory = this.config.workingDirectory;
 		if (!workingDirectory) {
 			return undefined;
@@ -749,11 +745,7 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 		}
 
 		try {
-			cpSync(source.path, target, {
-				recursive: true,
-				dereference: false,
-				errorOnExist: true,
-			});
+			symlinkSync(source.path, target, "dir");
 			return true;
 		} catch (error) {
 			console.warn(
