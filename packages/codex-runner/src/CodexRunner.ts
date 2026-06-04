@@ -63,6 +63,7 @@ interface McpAllowedToolsFilter {
 
 const DEFAULT_CODEX_MODEL = "gpt-5.5";
 const CODEX_MCP_DOCS_URL = "https://platform.openai.com/docs/docs-mcp";
+const CODEX_MCP_APPROVE_MODE = "approve";
 
 function toFiniteNumber(value: number | undefined): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -488,6 +489,47 @@ function getMcpAllowedToolsFilter(
 	return mergeMcpAllowedToolsFilters(matchingFilters);
 }
 
+function isConfigObject(value: unknown): value is CodexConfigOverrides {
+	return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function ensureCodexMcpToolApproval(
+	mapped: CodexConfigOverrides,
+	toolName: string,
+): void {
+	const tools = isConfigObject(mapped.tools) ? { ...mapped.tools } : {};
+	const existingToolConfig = tools[toolName];
+	const toolConfig = isConfigObject(existingToolConfig)
+		? { ...existingToolConfig }
+		: {};
+
+	if (!Object.hasOwn(toolConfig, "approval_mode")) {
+		toolConfig.approval_mode = CODEX_MCP_APPROVE_MODE;
+	}
+
+	tools[toolName] = toolConfig;
+	mapped.tools = tools;
+}
+
+function applyCyrusMcpApprovalSemantics(
+	mapped: CodexConfigOverrides,
+	allowedToolsFilter: McpAllowedToolsFilter,
+	options: { approveListedTools: boolean },
+): void {
+	if (!Object.hasOwn(mapped, "default_tools_approval_mode")) {
+		mapped.default_tools_approval_mode = CODEX_MCP_APPROVE_MODE;
+	}
+
+	// Codex separates tool visibility (`enabled_tools`) from approval. Cyrus
+	// allowedTools are already the operator's allow-list, so generated MCP
+	// allowances must also be pre-approved for non-interactive Codex exec runs.
+	if (options.approveListedTools && !allowedToolsFilter.allowAll) {
+		for (const tool of allowedToolsFilter.tools) {
+			ensureCodexMcpToolApproval(mapped, tool);
+		}
+	}
+}
+
 function copyConfigString(
 	target: CodexConfigOverrides,
 	source: Record<string, unknown>,
@@ -893,6 +935,11 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 				!hasNativeToolFilter
 			) {
 				mapped.enabled_tools = allowedToolsFilter.tools;
+			}
+			if (allowedToolsFilter) {
+				applyCyrusMcpApprovalSemantics(mapped, allowedToolsFilter, {
+					approveListedTools: !hasNativeToolFilter,
+				});
 			}
 			// If the MCP config already contains Codex-native enabled_tools or
 			// disabled_tools, keep those exact filters. They are more specific to

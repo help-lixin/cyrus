@@ -92,9 +92,20 @@ describe("CodexRunner MCP config mapping", () => {
 			"list_issues",
 			"create_issue",
 		]);
+		expect(mcpServers.linear.default_tools_approval_mode).toBe("approve");
+		expect(mcpServers.linear.tools).toEqual({
+			list_issues: { approval_mode: "approve" },
+			create_issue: { approval_mode: "approve" },
+		});
 		expect(mcpServers["cyrus-tools"].enabled_tools).toEqual([
 			"linear_agent_session_create_on_comment",
 		]);
+		expect(mcpServers["cyrus-tools"].default_tools_approval_mode).toBe(
+			"approve",
+		);
+		expect(mcpServers["cyrus-tools"].tools).toEqual({
+			linear_agent_session_create_on_comment: { approval_mode: "approve" },
+		});
 	});
 
 	it("leaves Codex MCP servers unrestricted for server-wide Cyrus MCP allowedTools", () => {
@@ -112,6 +123,7 @@ describe("CodexRunner MCP config mapping", () => {
 		const mcpServers = (runner as any).buildCodexMcpServersConfig();
 		expect(mcpServers.linear.enabled_tools).toBeUndefined();
 		expect(mcpServers.linear.disabled_tools).toBeUndefined();
+		expect(mcpServers.linear.default_tools_approval_mode).toBe("approve");
 	});
 
 	it("matches underscore Cyrus MCP server names to hyphenated Codex MCP server names", () => {
@@ -134,6 +146,13 @@ describe("CodexRunner MCP config mapping", () => {
 			"conversations_replies",
 			"attachment_get_data",
 		]);
+		expect(mcpServers["slack-fixed"].default_tools_approval_mode).toBe(
+			"approve",
+		);
+		expect(mcpServers["slack-fixed"].tools).toEqual({
+			conversations_replies: { approval_mode: "approve" },
+			attachment_get_data: { approval_mode: "approve" },
+		});
 	});
 
 	it("keeps Codex-native MCP tool filters ahead of Cyrus allowedTools translation", () => {
@@ -159,8 +178,12 @@ describe("CodexRunner MCP config mapping", () => {
 
 		const mcpServers = (runner as any).buildCodexMcpServersConfig();
 		expect(mcpServers.linear.enabled_tools).toEqual(["list_issues"]);
+		expect(mcpServers.linear.default_tools_approval_mode).toBe("approve");
+		expect(mcpServers.linear.tools).toBeUndefined();
 		expect(mcpServers.github.enabled_tools).toBeUndefined();
 		expect(mcpServers.github.disabled_tools).toEqual(["delete_repository"]);
+		expect(mcpServers.github.default_tools_approval_mode).toBe("approve");
+		expect(mcpServers.github.tools).toBeUndefined();
 	});
 
 	it("loads hosted file-based MCP configs and preserves Codex MCP options", () => {
