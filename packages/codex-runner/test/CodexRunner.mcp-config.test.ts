@@ -65,6 +65,82 @@ describe("CodexRunner MCP config mapping", () => {
 		expect(mcpServers.linear.bearer_token_env_var).toBe("LINEAR_API_TOKEN");
 	});
 
+	it("translates per-tool Cyrus MCP allowedTools to Codex enabled_tools", () => {
+		const runner = new CodexRunner({
+			workingDirectory: process.cwd(),
+			allowedTools: [
+				"Read",
+				"mcp__linear__list_issues",
+				"mcp__linear__create_issue",
+				"mcp__linear__list_issues",
+				"mcp__cyrus-tools__linear_agent_session_create_on_comment",
+			],
+			mcpConfig: {
+				linear: {
+					type: "http",
+					url: "https://mcp.linear.app/mcp",
+				},
+				"cyrus-tools": {
+					type: "http",
+					url: "http://127.0.0.1:4444/mcp/cyrus-tools",
+				},
+			},
+		});
+
+		const mcpServers = (runner as any).buildCodexMcpServersConfig();
+		expect(mcpServers.linear.enabled_tools).toEqual([
+			"list_issues",
+			"create_issue",
+		]);
+		expect(mcpServers["cyrus-tools"].enabled_tools).toEqual([
+			"linear_agent_session_create_on_comment",
+		]);
+	});
+
+	it("leaves Codex MCP servers unrestricted for server-wide Cyrus MCP allowedTools", () => {
+		const runner = new CodexRunner({
+			workingDirectory: process.cwd(),
+			allowedTools: ["mcp__linear", "mcp__linear__list_issues"],
+			mcpConfig: {
+				linear: {
+					type: "http",
+					url: "https://mcp.linear.app/mcp",
+				},
+			},
+		});
+
+		const mcpServers = (runner as any).buildCodexMcpServersConfig();
+		expect(mcpServers.linear.enabled_tools).toBeUndefined();
+		expect(mcpServers.linear.disabled_tools).toBeUndefined();
+	});
+
+	it("keeps Codex-native MCP tool filters ahead of Cyrus allowedTools translation", () => {
+		const runner = new CodexRunner({
+			workingDirectory: process.cwd(),
+			allowedTools: [
+				"mcp__linear__create_issue",
+				"mcp__github__create_pull_request",
+			],
+			mcpConfig: {
+				linear: {
+					type: "http",
+					url: "https://mcp.linear.app/mcp",
+					enabled_tools: ["list_issues"],
+				} as any,
+				github: {
+					type: "http",
+					url: "https://example.com/github/mcp",
+					disabled_tools: ["delete_repository"],
+				} as any,
+			},
+		});
+
+		const mcpServers = (runner as any).buildCodexMcpServersConfig();
+		expect(mcpServers.linear.enabled_tools).toEqual(["list_issues"]);
+		expect(mcpServers.github.enabled_tools).toBeUndefined();
+		expect(mcpServers.github.disabled_tools).toEqual(["delete_repository"]);
+	});
+
 	it("loads hosted file-based MCP configs and preserves Codex MCP options", () => {
 		const tmp = mkdtempSync(join(tmpdir(), "cyrus-codex-mcp-"));
 		try {
