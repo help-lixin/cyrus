@@ -114,6 +114,28 @@ describe("CodexRunner MCP config mapping", () => {
 		expect(mcpServers.linear.disabled_tools).toBeUndefined();
 	});
 
+	it("matches underscore Cyrus MCP server names to hyphenated Codex MCP server names", () => {
+		const runner = new CodexRunner({
+			workingDirectory: process.cwd(),
+			allowedTools: [
+				"mcp__slack_fixed__conversations_replies",
+				"mcp__slack_fixed__attachment_get_data",
+			],
+			mcpConfig: {
+				"slack-fixed": {
+					type: "http",
+					url: "https://example.com/slack-fixed/mcp",
+				},
+			},
+		});
+
+		const mcpServers = (runner as any).buildCodexMcpServersConfig();
+		expect(mcpServers["slack-fixed"].enabled_tools).toEqual([
+			"conversations_replies",
+			"attachment_get_data",
+		]);
+	});
+
 	it("keeps Codex-native MCP tool filters ahead of Cyrus allowedTools translation", () => {
 		const runner = new CodexRunner({
 			workingDirectory: process.cwd(),

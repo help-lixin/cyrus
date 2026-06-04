@@ -432,6 +432,62 @@ function buildMcpAllowedToolsFilters(
 	return filters;
 }
 
+function normalizeMcpServerFilterName(serverName: string): string {
+	return serverName.replace(/[-_]+/g, "").toLowerCase();
+}
+
+function mergeMcpAllowedToolsFilters(
+	filters: McpAllowedToolsFilter[],
+): McpAllowedToolsFilter | undefined {
+	if (filters.length === 0) {
+		return undefined;
+	}
+
+	const merged: McpAllowedToolsFilter = {
+		allowAll: false,
+		tools: [],
+	};
+
+	for (const filter of filters) {
+		if (filter.allowAll) {
+			return { allowAll: true, tools: [] };
+		}
+
+		for (const tool of filter.tools) {
+			if (!merged.tools.includes(tool)) {
+				merged.tools.push(tool);
+			}
+		}
+	}
+
+	return merged;
+}
+
+function getMcpAllowedToolsFilter(
+	filters: Map<string, McpAllowedToolsFilter>,
+	serverName: string,
+): McpAllowedToolsFilter | undefined {
+	const matchingFilters: McpAllowedToolsFilter[] = [];
+	const exact = filters.get(serverName);
+	if (exact) {
+		matchingFilters.push(exact);
+	}
+
+	const normalizedServerName = normalizeMcpServerFilterName(serverName);
+	for (const [allowedServerName, filter] of filters.entries()) {
+		if (allowedServerName === serverName) {
+			continue;
+		}
+		if (
+			normalizeMcpServerFilterName(allowedServerName) === normalizedServerName
+		) {
+			matchingFilters.push(filter);
+		}
+	}
+
+	return mergeMcpAllowedToolsFilters(matchingFilters);
+}
+
 function copyConfigString(
 	target: CodexConfigOverrides,
 	source: Record<string, unknown>,
@@ -823,7 +879,10 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 				continue;
 			}
 
-			const allowedToolsFilter = allowedToolsFilters.get(serverName);
+			const allowedToolsFilter = getMcpAllowedToolsFilter(
+				allowedToolsFilters,
+				serverName,
+			);
 			const hasNativeToolFilter =
 				Object.hasOwn(mapped, "enabled_tools") ||
 				Object.hasOwn(mapped, "disabled_tools");
