@@ -43,10 +43,36 @@ codex 0.125.0 (`experiments/sandbox-network.mjs`):
   through this path (it's `experimental_` and presumably needs activation we don't
   have via app-server config — a feature flag and/or its managed proxy).
 
-**Decision:** keep network **coarse (on/off) per-thread** for now — already covered by
-the sandbox union's `networkAccess`. Do **not** map domain allow-lists to
-`experimental_network` until it's enforceable via a drivable path (or graduates from
-experimental); the mapping itself is trivial once it works.
+### Follow-up: the feature is Linux-only (root cause of the macOS no-op)
+
+Tried enabling it properly + checked the latest SDK:
+- **No `features.*` flag** gates it (0.125 and 0.137 feature lists checked); the
+  config keys are snake_case (`experimental_network.{enabled,domains,allowed_domains,
+  managed_allowed_domains_only,http_port,socks_port,...}`) and the binary *parses*
+  them (it errors if you mix `domains` with legacy `allowed_domains`).
+- **It still didn't enforce on macOS** with the latest **0.137.0** either (denied
+  domain reached). Binary strings explain why: enforcement is **landlock-based and
+  `only supported on Linux`** (`landlock`, `--allow-network`, `network enforcement
+  is active`); macOS uses `sandbox-exec` (Seatbelt) and does **not** do domain-level
+  network filtering. So the macOS negative result is expected — the feature is a
+  no-op there, not broken.
+
+**Implication:** Codex-native domain network permissions would likely enforce on
+**Linux** (Cyrus's cloud runtime) but silently no-op on macOS self-host. Shipping it
+unconditionally is therefore risky (false sense of restriction on macOS). Needs a
+Linux validation run before relying on it; if adopted, gate/document the
+platform-conditional behavior. Until then: **coarse on/off per-thread** (the sandbox
+union's `networkAccess`) is the cross-platform behavior we keep.
+
+### Latest SDK (0.137.0) notes
+- `NetworkRequirements` schema is **identical** to 0.125 (no network model change).
+- New protocol surface vs 0.125: `permissionProfile` gained list/active APIs
+  (`PermissionProfileList*`, `ActivePermissionProfile`, `PermissionProfileSummary`),
+  plus plugin-marketplace, hooks, `ComputerUseRequirements`, model-provider
+  capability APIs.
+- **Vendored binary layout changed**: `vendor/<triple>/bin/codex` (0.137) vs
+  `vendor/<triple>/codex/codex` (0.125) — `resolveCodexBinary` would need updating
+  before any bump.
 
 ## 1. Goal
 

@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import readline from "node:readline";
 
-const CODEX_BIN = execFileSync("bash", [
+const CODEX_BIN = process.env.CODEX_BIN || execFileSync("bash", [
   "-c",
   "find /Users/agentops/code/cyrus/node_modules/.pnpm -path '*@openai+codex@*-darwin-arm64*/vendor/*/codex/codex' | head -1",
 ]).toString().trim();
