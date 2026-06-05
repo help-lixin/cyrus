@@ -2,11 +2,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CodexRunner } from "../src/CodexRunner.js";
+import { buildCodexMcpServersConfig } from "../src/config/mcpConfigTranslator.js";
 
 describe("CodexRunner MCP config mapping", () => {
 	it("maps generic headers to Codex http_headers for HTTP MCP servers", () => {
-		const runner = new CodexRunner({
+		const mcpServers = buildCodexMcpServersConfig({
 			workingDirectory: process.cwd(),
 			mcpConfig: {
 				linear: {
@@ -27,7 +27,6 @@ describe("CodexRunner MCP config mapping", () => {
 			},
 		});
 
-		const mcpServers = (runner as any).buildCodexMcpServersConfig();
 		expect(mcpServers.linear.http_headers).toEqual({
 			Authorization: "Bearer linear-token",
 		});
@@ -38,7 +37,7 @@ describe("CodexRunner MCP config mapping", () => {
 	});
 
 	it("preserves codex-native header fields when provided", () => {
-		const runner = new CodexRunner({
+		const mcpServers = buildCodexMcpServersConfig({
 			workingDirectory: process.cwd(),
 			mcpConfig: {
 				linear: {
@@ -55,7 +54,6 @@ describe("CodexRunner MCP config mapping", () => {
 			},
 		});
 
-		const mcpServers = (runner as any).buildCodexMcpServersConfig();
 		expect(mcpServers.linear.http_headers).toEqual({
 			"x-test-header": "value",
 		});
@@ -66,7 +64,7 @@ describe("CodexRunner MCP config mapping", () => {
 	});
 
 	it("translates per-tool Cyrus MCP allowedTools to Codex enabled_tools", () => {
-		const runner = new CodexRunner({
+		const mcpServers = buildCodexMcpServersConfig({
 			workingDirectory: process.cwd(),
 			allowedTools: [
 				"Read",
@@ -87,7 +85,6 @@ describe("CodexRunner MCP config mapping", () => {
 			},
 		});
 
-		const mcpServers = (runner as any).buildCodexMcpServersConfig();
 		expect(mcpServers.linear.enabled_tools).toEqual([
 			"list_issues",
 			"create_issue",
@@ -104,7 +101,7 @@ describe("CodexRunner MCP config mapping", () => {
 	});
 
 	it("leaves Codex MCP servers unrestricted for server-wide Cyrus MCP allowedTools", () => {
-		const runner = new CodexRunner({
+		const mcpServers = buildCodexMcpServersConfig({
 			workingDirectory: process.cwd(),
 			allowedTools: ["mcp__linear", "mcp__linear__list_issues"],
 			mcpConfig: {
@@ -115,14 +112,13 @@ describe("CodexRunner MCP config mapping", () => {
 			},
 		});
 
-		const mcpServers = (runner as any).buildCodexMcpServersConfig();
 		expect(mcpServers.linear.enabled_tools).toBeUndefined();
 		expect(mcpServers.linear.disabled_tools).toBeUndefined();
 		expect(mcpServers.linear.default_tools_approval_mode).toBe("approve");
 	});
 
 	it("matches underscore Cyrus MCP server names to hyphenated Codex MCP server names", () => {
-		const runner = new CodexRunner({
+		const mcpServers = buildCodexMcpServersConfig({
 			workingDirectory: process.cwd(),
 			allowedTools: [
 				"mcp__slack_fixed__conversations_replies",
@@ -136,7 +132,6 @@ describe("CodexRunner MCP config mapping", () => {
 			},
 		});
 
-		const mcpServers = (runner as any).buildCodexMcpServersConfig();
 		expect(mcpServers["slack-fixed"].enabled_tools).toEqual([
 			"conversations_replies",
 			"attachment_get_data",
@@ -148,7 +143,7 @@ describe("CodexRunner MCP config mapping", () => {
 	});
 
 	it("keeps Codex-native MCP tool filters ahead of Cyrus allowedTools translation", () => {
-		const runner = new CodexRunner({
+		const mcpServers = buildCodexMcpServersConfig({
 			workingDirectory: process.cwd(),
 			allowedTools: [
 				"mcp__linear__create_issue",
@@ -168,7 +163,6 @@ describe("CodexRunner MCP config mapping", () => {
 			},
 		});
 
-		const mcpServers = (runner as any).buildCodexMcpServersConfig();
 		expect(mcpServers.linear.enabled_tools).toEqual(["list_issues"]);
 		expect(mcpServers.linear.default_tools_approval_mode).toBe("approve");
 		expect(mcpServers.linear.tools).toBeUndefined();
@@ -220,12 +214,11 @@ describe("CodexRunner MCP config mapping", () => {
 				"utf8",
 			);
 
-			const runner = new CodexRunner({
+			const mcpServers = buildCodexMcpServersConfig({
 				workingDirectory: process.cwd(),
 				mcpConfigPath,
 			});
 
-			const mcpServers = (runner as any).buildCodexMcpServersConfig();
 			expect(mcpServers.hosted).toMatchObject({
 				command: "node",
 				args: ["server.js"],

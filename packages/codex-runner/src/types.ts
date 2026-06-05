@@ -2,7 +2,6 @@ import type {
 	ApprovalMode,
 	ModelReasoningEffort,
 	SandboxMode,
-	ThreadEvent,
 	WebSearchMode,
 } from "@openai/codex-sdk";
 import type {
@@ -19,11 +18,6 @@ export type CodexConfigValue =
 	| { [key: string]: CodexConfigValue };
 
 export type CodexConfigOverrides = { [key: string]: CodexConfigValue };
-
-/**
- * Typed event shape emitted by Codex SDK thread streams.
- */
-export type CodexJsonEvent = ThreadEvent;
 
 /**
  * Configuration for CodexRunner.
@@ -71,5 +65,4 @@ export interface CodexRunnerEvents {
 	message: (message: SDKMessage) => void;
 	error: (error: Error) => void;
 	complete: (messages: SDKMessage[]) => void;
-	streamEvent: (event: CodexJsonEvent) => void;
 }

@@ -25,11 +25,6 @@ function getDefaultReasoningEffortForModel(
 export class CodexConfigBuilder {
 	constructor(private readonly config: CodexRunnerConfig) {}
 
-	/** The (possibly fallback-substituted) model resolved by {@link build}. */
-	get resolvedModel(): string | undefined {
-		return this.config.model;
-	}
-
 	async build(): Promise<ResolvedCodexConfig> {
 		await this.resolveModelWithFallback();
 

@@ -29,9 +29,8 @@ interface TurnStartResult {
 
 /**
  * Backend that drives Codex through the persistent `codex app-server` JSON-RPC
- * protocol. Unlike the exec backend, the process stays alive across turns and
- * supports injecting input into an active turn via `turn/steer`
- * ({@link supportsSteer} is true).
+ * protocol. The process stays alive across turns and supports injecting input
+ * into an active turn via `turn/steer` ({@link supportsSteer} is true).
  */
 export class AppServerCodexBackend
 	extends EventEmitter
@@ -48,6 +47,8 @@ export class AppServerCodexBackend
 		output_tokens: 0,
 		cached_input_tokens: 0,
 	};
+	/** Structured-output schema for turns, captured at open() for turn/start. */
+	private outputSchema: unknown;
 
 	/** Resolver for the in-flight {@link runTurn} promise. */
 	private turnResolve: (() => void) | null = null;
@@ -76,9 +77,6 @@ export class AppServerCodexBackend
 		this.turnIdleTimeoutMs = options?.turnIdleTimeoutMs ?? 300_000;
 		this.requestTimeoutMs = options?.requestTimeoutMs;
 	}
-
-	/** Structured-output schema for turns, captured at open() for turn/start. */
-	private outputSchema: unknown;
 
 	async open(config: ResolvedCodexConfig): Promise<{ threadId: string }> {
 		this.outputSchema = config.outputSchema;
@@ -232,10 +230,8 @@ export class AppServerCodexBackend
 	}
 
 	/**
-	 * Build the free-form Codex `config` object for thread/start.
-	 *
-	 * The exec backend grants extra working-tree roots via `--add-dir`; the
-	 * app-server has no such flag, so `additionalDirectories` are mapped onto
+	 * Build the free-form Codex `config` object for thread/start. The app-server
+	 * has no `--add-dir` flag, so `additionalDirectories` are mapped onto
 	 * `sandbox_workspace_write.writable_roots` (merged with any existing roots)
 	 * so multi-repo sessions can write to their sibling sub-worktrees. MCP
 	 * servers and other overrides ride along in `configOverrides`.

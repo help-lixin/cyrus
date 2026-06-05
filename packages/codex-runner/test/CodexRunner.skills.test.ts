@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CodexRunner } from "../src/CodexRunner.js";
+import { CodexSkillStager } from "../src/CodexSkillStager.js";
 
 function writeSkill(root: string, name: string): string {
 	const skillDir = join(root, name);
@@ -23,7 +23,7 @@ function writeSkill(root: string, name: string): string {
 	return skillDir;
 }
 
-describe("CodexRunner managed skills", () => {
+describe("CodexSkillStager", () => {
 	let tempDirs: string[] = [];
 
 	afterEach(() => {
@@ -40,7 +40,7 @@ describe("CodexRunner managed skills", () => {
 		return dir;
 	}
 
-	it("stages allowed managed and repo-local skills as Codex repo skill symlinks", () => {
+	it("stages allowed managed and repo-local skills as Codex repo skill symlinks, and cleans them up", () => {
 		const root = makeTempDir();
 		const worktree = join(root, "worktree");
 		const userPlugin = join(root, "user-plugin");
@@ -50,19 +50,15 @@ describe("CodexRunner managed skills", () => {
 		writeSkill(join(internalPlugin, "skills"), "implementation");
 		writeSkill(join(worktree, ".claude", "skills"), "repo-local");
 
-		const runner = new CodexRunner({
+		const stager = new CodexSkillStager({
 			workingDirectory: worktree,
-			cyrusHome: root,
 			plugins: [
 				{ type: "local", path: userPlugin },
 				{ type: "local", path: internalPlugin },
 			],
 			skills: ["custom-user", "repo-local"],
 		});
-
-		(
-			runner as unknown as { prepareManagedSkillsForCodex: () => void }
-		).prepareManagedSkillsForCodex();
+		stager.stage();
 
 		const stagedUserSkill = join(worktree, ".agents", "skills", "custom-user");
 		const stagedRepoSkill = join(worktree, ".agents", "skills", "repo-local");
@@ -74,15 +70,19 @@ describe("CodexRunner managed skills", () => {
 		expect(readFileSync(join(stagedRepoSkill, "SKILL.md"), "utf-8")).toContain(
 			"name: repo-local",
 		);
+		// Skills not in the allow-list are not staged.
 		expect(
 			existsSync(join(worktree, ".agents", "skills", "implementation")),
 		).toBe(false);
+		expect(stager.getStagedSkillNames().sort()).toEqual([
+			"custom-user",
+			"repo-local",
+		]);
 
-		(
-			runner as unknown as { cleanupRuntimeState: () => void }
-		).cleanupRuntimeState();
+		stager.cleanup();
 		expect(existsSync(stagedUserSkill)).toBe(false);
 		expect(existsSync(stagedRepoSkill)).toBe(false);
+		expect(stager.getStagedSkillNames()).toEqual([]);
 	});
 
 	it("does not overwrite an existing Codex skill with the same name", () => {
@@ -95,57 +95,17 @@ describe("CodexRunner managed skills", () => {
 		writeSkill(join(userPlugin, "skills"), "custom-user");
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-		const runner = new CodexRunner({
+		new CodexSkillStager({
 			workingDirectory: worktree,
-			cyrusHome: root,
 			plugins: [{ type: "local", path: userPlugin }],
 			skills: ["custom-user"],
-		});
-
-		(
-			runner as unknown as { prepareManagedSkillsForCodex: () => void }
-		).prepareManagedSkillsForCodex();
+		}).stage();
 
 		const existingSkill = join(worktree, ".agents", "skills", "custom-user");
 		expect(lstatSync(existingSkill).isDirectory()).toBe(true);
 		expect(warn).toHaveBeenCalledWith(
 			expect.stringContaining("Skipping managed skill 'custom-user'"),
 		);
-	});
-
-	it("removes staged skill symlinks when the runner is stopped", () => {
-		const root = makeTempDir();
-		const worktree = join(root, "worktree");
-		const userPlugin = join(root, "user-plugin");
-		mkdirSync(worktree, { recursive: true });
-		writeSkill(join(userPlugin, "skills"), "custom-user");
-
-		const runner = new CodexRunner({
-			workingDirectory: worktree,
-			cyrusHome: root,
-			plugins: [{ type: "local", path: userPlugin }],
-			skills: ["custom-user"],
-		});
-
-		(
-			runner as unknown as { prepareManagedSkillsForCodex: () => void }
-		).prepareManagedSkillsForCodex();
-		(
-			runner as unknown as {
-				sessionInfo: { sessionId: string; startedAt: Date; isRunning: boolean };
-			}
-		).sessionInfo = {
-			sessionId: "session-1",
-			startedAt: new Date(),
-			isRunning: true,
-		};
-
-		const stagedUserSkill = join(worktree, ".agents", "skills", "custom-user");
-		expect(lstatSync(stagedUserSkill).isSymbolicLink()).toBe(true);
-
-		runner.stop();
-
-		expect(existsSync(stagedUserSkill)).toBe(false);
 	});
 
 	it("adds the staged .agents directory to local git exclude", () => {
@@ -156,16 +116,11 @@ describe("CodexRunner managed skills", () => {
 		execFileSync("git", ["init"], { cwd: worktree, stdio: "ignore" });
 		writeSkill(join(userPlugin, "skills"), "custom-user");
 
-		const runner = new CodexRunner({
+		new CodexSkillStager({
 			workingDirectory: worktree,
-			cyrusHome: root,
 			plugins: [{ type: "local", path: userPlugin }],
 			skills: ["custom-user"],
-		});
-
-		(
-			runner as unknown as { prepareManagedSkillsForCodex: () => void }
-		).prepareManagedSkillsForCodex();
+		}).stage();
 
 		const exclude = readFileSync(join(worktree, ".git", "info", "exclude"), {
 			encoding: "utf-8",

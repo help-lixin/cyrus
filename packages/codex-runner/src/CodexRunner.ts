@@ -6,12 +6,10 @@ import type {
 	CodexBackend,
 	CodexUserInput,
 	NormalizedCodexEvent,
-	ResolvedCodexConfig,
 } from "./backend/types.js";
 import { CodexEventMapper, type MapperContext } from "./CodexEventMapper.js";
 import { CodexSkillStager } from "./CodexSkillStager.js";
 import { CodexConfigBuilder } from "./config/CodexConfigBuilder.js";
-import { buildCodexMcpServersConfig } from "./config/mcpConfigTranslator.js";
 import { CodexMessageFormatter } from "./formatter.js";
 import type {
 	CodexRunnerConfig,
@@ -36,30 +34,29 @@ export declare interface CodexRunner {
  * The runner is a thin orchestrator: it owns session lifecycle and delegates
  * configuration assembly ({@link CodexConfigBuilder}), skill staging
  * ({@link CodexSkillStager}), event→message mapping ({@link CodexEventMapper}),
- * and transport ({@link CodexBackend}) to dedicated collaborators.
+ * and transport ({@link CodexBackend}) to dedicated collaborators. Codex is
+ * driven exclusively through the app-server backend, which supports mid-turn
+ * input injection (`turn/steer`).
  */
 export class CodexRunner extends EventEmitter implements IAgentRunner {
-	// Codex is driven exclusively through the app-server backend, which supports
-	// mid-turn input injection (turn/steer).
 	readonly supportsStreamingInput = true;
 
-	private config: CodexRunnerConfig;
-	private formatter: IMessageFormatter;
-	private sessionInfo: CodexSessionInfo | null = null;
-	private wasStopped = false;
-
+	private readonly config: CodexRunnerConfig;
+	private readonly formatter: IMessageFormatter;
 	private readonly skillStager: CodexSkillStager;
 	private readonly mapper: CodexEventMapper;
-	private resolvedConfig: ResolvedCodexConfig | null = null;
+
+	private sessionInfo: CodexSessionInfo | null = null;
 	private backend: CodexBackend | null = null;
+	private wasStopped = false;
+	/** Set once the turn reaches a terminal state; gates {@link isStreaming}. */
+	private turnFinished = false;
 	/**
 	 * Follow-up messages that arrived before the turn became steerable (during
 	 * config build / process spawn / thread start). Flushed via `steer` once the
 	 * turn starts, so a fast follow-up is never lost or wrongly deferred.
 	 */
 	private pendingFollowups: string[] = [];
-	/** Set once the turn reaches a terminal state; gates `isStreaming()`. */
-	private turnFinished = false;
 
 	constructor(config: CodexRunnerConfig) {
 		super();
@@ -83,34 +80,24 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 	}
 
 	async startStreaming(initialPrompt?: string): Promise<CodexSessionInfo> {
-		return this.startWithPrompt(null, initialPrompt);
+		return this.startWithPrompt(initialPrompt);
 	}
 
 	/**
-	 * Inject a mid-turn message. With the app-server backend this steers the
-	 * active turn (`turn/steer`) so in-flight work is preserved. With the exec
-	 * backend there is no input channel, so this throws (callers guard on
-	 * {@link supportsStreamingInput}).
+	 * Inject a message mid-session. While a turn is steerable it is sent
+	 * immediately (`turn/steer`); during the startup window (before the turn
+	 * begins) it is buffered and flushed once the turn starts. Throws only once
+	 * the turn has finished, where the caller should resume with a new turn.
 	 */
 	addStreamMessage(content: string): void {
-		const backend = this.backend;
-		if (!backend?.supportsSteer || !backend.steer) {
-			throw new Error("CodexRunner does not support streaming input messages");
-		}
-		if (backend.isTurnActive()) {
-			// Turn is live — steer immediately.
+		if (this.backend?.isTurnActive()) {
 			this.steer(content);
 			return;
 		}
 		if (this.isRunning() && !this.turnFinished) {
-			// Session is starting up (config build / process spawn / thread start)
-			// or the turn hasn't begun yet — buffer and flush once it starts so a
-			// fast follow-up isn't lost. (Without this the message would be wrongly
-			// deferred during the multi-second startup window.)
 			this.pendingFollowups.push(content);
 			return;
 		}
-		// The turn has already finished; the caller should resume with a new turn.
 		throw new Error("Cannot stream message: no active Codex turn");
 	}
 
@@ -128,39 +115,36 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 		);
 	}
 
-	private steer(content: string): void {
-		void this.backend
-			?.steer?.([{ type: "text", text: content }])
-			.catch((error) => {
-				this.emit(
-					"error",
-					error instanceof Error ? error : new Error(String(error)),
-				);
-			});
+	stop(): void {
+		if (this.sessionInfo?.isRunning) {
+			this.wasStopped = true;
+		}
+		this.cleanupRuntimeState();
 	}
 
-	private flushPendingFollowups(): void {
-		if (this.pendingFollowups.length === 0) {
-			return;
-		}
-		const queued = this.pendingFollowups;
-		this.pendingFollowups = [];
-		for (const content of queued) {
-			this.steer(content);
-		}
+	isRunning(): boolean {
+		return this.sessionInfo?.isRunning ?? false;
 	}
+
+	getMessages(): SDKMessage[] {
+		return this.mapper.getMessages();
+	}
+
+	getFormatter(): IMessageFormatter {
+		return this.formatter;
+	}
+
+	// ---- internals ----------------------------------------------------------
 
 	private async startWithPrompt(
-		stringPrompt?: string | null,
-		streamingInitialPrompt?: string,
+		prompt?: string | null,
 	): Promise<CodexSessionInfo> {
 		if (this.isRunning()) {
 			throw new Error("Codex session already running");
 		}
 
-		const sessionId = this.config.resumeSessionId || crypto.randomUUID();
 		this.sessionInfo = {
-			sessionId,
+			sessionId: this.config.resumeSessionId || crypto.randomUUID(),
 			startedAt: new Date(),
 			isRunning: true,
 		};
@@ -172,19 +156,21 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 		// Create the backend up front (before the slow config build / process
 		// spawn) so addStreamMessage can buffer follow-ups that arrive during the
 		// startup window rather than throwing.
-		this.backend = this.createBackend();
-		this.backend.on("event", (event) => this.handleBackendEvent(event));
+		const backend = this.createBackend();
+		this.backend = backend;
+		backend.on("event", (event) => this.handleBackendEvent(event));
 
-		const builder = new CodexConfigBuilder(this.config);
-		this.resolvedConfig = await builder.build();
+		const resolved = await new CodexConfigBuilder(this.config).build();
 		this.skillStager.stage();
 
-		const prompt = (stringPrompt ?? streamingInitialPrompt ?? "").trim();
+		const input: CodexUserInput[] = prompt?.trim()
+			? [{ type: "text", text: prompt.trim() }]
+			: [];
 
 		let caughtError: unknown;
 		try {
-			await this.backend.open(this.resolvedConfig);
-			await this.backend.runTurn(this.toUserInput(prompt));
+			await backend.open(resolved);
+			await backend.runTurn(input);
 		} catch (error) {
 			caughtError = error;
 		} finally {
@@ -192,6 +178,10 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 		}
 
 		return this.sessionInfo;
+	}
+
+	private createBackend(): CodexBackend {
+		return new AppServerCodexBackend();
 	}
 
 	private handleBackendEvent(event: NormalizedCodexEvent): void {
@@ -207,12 +197,23 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 		this.mapper.handle(event);
 	}
 
-	private toUserInput(prompt: string): CodexUserInput[] {
-		return prompt ? [{ type: "text", text: prompt }] : [];
+	private steer(content: string): void {
+		void this.backend
+			?.steer?.([{ type: "text", text: content }])
+			.catch((error) => {
+				this.emit(
+					"error",
+					error instanceof Error ? error : new Error(String(error)),
+				);
+			});
 	}
 
-	private createBackend(): CodexBackend {
-		return new AppServerCodexBackend();
+	private flushPendingFollowups(): void {
+		const queued = this.pendingFollowups;
+		this.pendingFollowups = [];
+		for (const content of queued) {
+			this.steer(content);
+		}
 	}
 
 	private buildMapperContext(): MapperContext {
@@ -257,48 +258,5 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 			void backend.close();
 		}
 		this.skillStager.cleanup();
-	}
-
-	stop(): void {
-		if (this.sessionInfo?.isRunning) {
-			this.wasStopped = true;
-		}
-		this.cleanupRuntimeState();
-	}
-
-	isRunning(): boolean {
-		return this.sessionInfo?.isRunning ?? false;
-	}
-
-	getMessages(): SDKMessage[] {
-		return this.mapper.getMessages();
-	}
-
-	getFormatter(): IMessageFormatter {
-		return this.formatter;
-	}
-
-	// ---- Backward-compatible test shims -------------------------------------
-	// These delegate to the extracted collaborators so existing unit tests that
-	// reach into private methods keep exercising real behavior.
-
-	/** @internal — staging entry point used by skills tests. */
-	protected prepareManagedSkillsForCodex(): void {
-		this.skillStager.stage();
-	}
-
-	/** @internal — MCP translation entry point used by mcp-config tests. */
-	protected buildCodexMcpServersConfig() {
-		return buildCodexMcpServersConfig({
-			workingDirectory: this.config.workingDirectory,
-			mcpConfigPath: this.config.mcpConfigPath,
-			mcpConfig: this.config.mcpConfig,
-			allowedTools: this.config.allowedTools,
-		});
-	}
-
-	/** @internal — event mapping entry point used by tool-event tests. */
-	protected handleEvent(event: NormalizedCodexEvent): void {
-		this.mapper.handle(event);
 	}
 }
