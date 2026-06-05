@@ -24,6 +24,30 @@ denies inside an allowed root are not expressible (acceptable).
 Default case (no Cyrus sandbox settings) stays on the coarse `thread/start.sandbox`
 mode (broad reads) so we don't silently tighten reads for existing sessions.
 
+## Network finding (domain-level via Codex native — NOT viable in 0.125.0)
+
+Investigated whether to leverage Codex's *own* network permissions (instead of the
+Cyrus egress proxy, which is out of scope). Codex does define a native per-domain
+model — the `experimental_network` config table (`NetworkRequirements`): a `domains`
+allow/deny map, legacy `allowed_domains`/`denied_domains`, `managed_allowed_domains_only`,
+and a managed proxy (`http_port`/`socks_port`/`allow_upstream_proxy`).
+
+But it does **not enforce** when supplied via `thread/start.config` in the bundled
+codex 0.125.0 (`experiments/sandbox-network.mjs`):
+- With `experimental_network` set (both camelCase and snake_case keys, both the
+  `domains` map and the legacy arrays), a domain **not** in the allow-list
+  (`api.github.com`) still reached (`exit 0`).
+- Control: coarse `sandbox_workspace_write.network_access: false` **does** block all
+  network (`Could not resolve host`, exit 6) — so the harness is sound and the
+  coarse on/off knob works; only the granular `experimental_network` feature is inert
+  through this path (it's `experimental_` and presumably needs activation we don't
+  have via app-server config — a feature flag and/or its managed proxy).
+
+**Decision:** keep network **coarse (on/off) per-thread** for now — already covered by
+the sandbox union's `networkAccess`. Do **not** map domain allow-lists to
+`experimental_network` until it's enforceable via a drivable path (or graduates from
+experimental); the mapping itself is trivial once it works.
+
 ## 1. Goal
 
 Apply a **specific sandbox policy per app-server thread** (i.e. per Cyrus session)
