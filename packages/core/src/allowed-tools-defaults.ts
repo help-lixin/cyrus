@@ -33,8 +33,6 @@ export const LINEAR_DEFAULT_ALLOWED_TOOLS = [
 	"Read",
 	"Edit",
 	"Write",
-	"Glob",
-	"Grep",
 	"NotebookEdit",
 
 	// Execution
@@ -83,6 +81,9 @@ export const LINEAR_DEFAULT_ALLOWED_TOOLS = [
 	// Workflow orchestration
 	"Workflow",
 
+	// Remote orchestration
+	"RemoteTrigger",
+
 	// Workspace MCP servers — explicit, no implicit appending. Linear
 	// sessions include `mcp__slack` so Cyrus can post status updates and
 	// follow-up messages to Slack while working on an issue.
@@ -105,8 +106,6 @@ export const LINEAR_DEFAULT_ALLOWED_TOOLS = [
 export const SLACK_DEFAULT_ALLOWED_TOOLS = [
 	// Read access to configured repository paths
 	"Read",
-	"Glob",
-	"Grep",
 	"Bash(git -C * pull)",
 
 	// Web
@@ -158,8 +157,6 @@ export const GITHUB_DEFAULT_ALLOWED_TOOLS = [
 	"Read",
 	"Edit",
 	"Write",
-	"Glob",
-	"Grep",
 	"NotebookEdit",
 
 	// Execution
@@ -207,6 +204,9 @@ export const GITHUB_DEFAULT_ALLOWED_TOOLS = [
 
 	// Workflow orchestration
 	"Workflow",
+
+	// Remote orchestration
+	"RemoteTrigger",
 
 	// Workspace MCP servers GitHub sessions need
 	"mcp__linear",
