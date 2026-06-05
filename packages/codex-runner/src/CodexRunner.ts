@@ -2,10 +2,6 @@ import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { IAgentRunner, IMessageFormatter, SDKMessage } from "cyrus-core";
 import { AppServerCodexBackend } from "./backend/AppServerCodexBackend.js";
-import {
-	ExecCodexBackend,
-	normalizeExecEvent,
-} from "./backend/ExecCodexBackend.js";
 import type {
 	CodexBackend,
 	CodexUserInput,
@@ -18,7 +14,6 @@ import { CodexConfigBuilder } from "./config/CodexConfigBuilder.js";
 import { buildCodexMcpServersConfig } from "./config/mcpConfigTranslator.js";
 import { CodexMessageFormatter } from "./formatter.js";
 import type {
-	CodexJsonEvent,
 	CodexRunnerConfig,
 	CodexRunnerEvents,
 	CodexSessionInfo,
@@ -44,7 +39,9 @@ export declare interface CodexRunner {
  * and transport ({@link CodexBackend}) to dedicated collaborators.
  */
 export class CodexRunner extends EventEmitter implements IAgentRunner {
-	readonly supportsStreamingInput: boolean;
+	// Codex is driven exclusively through the app-server backend, which supports
+	// mid-turn input injection (turn/steer).
+	readonly supportsStreamingInput = true;
 
 	private config: CodexRunnerConfig;
 	private formatter: IMessageFormatter;
@@ -75,7 +72,6 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 			plugins: config.plugins,
 		});
 		this.mapper = new CodexEventMapper(this.buildMapperContext());
-		this.supportsStreamingInput = this.shouldUseAppServer();
 
 		if (config.onMessage) this.on("message", config.onMessage);
 		if (config.onError) this.on("error", config.onError);
@@ -216,14 +212,7 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 	}
 
 	private createBackend(): CodexBackend {
-		return this.shouldUseAppServer()
-			? new AppServerCodexBackend()
-			: new ExecCodexBackend();
-	}
-
-	/** Whether this runner should drive Codex via the app-server backend. */
-	private shouldUseAppServer(): boolean {
-		return this.config.useAppServer ?? process.env.CODEX_USE_APP_SERVER === "1";
+		return new AppServerCodexBackend();
 	}
 
 	private buildMapperContext(): MapperContext {
@@ -309,11 +298,7 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 	}
 
 	/** @internal — event mapping entry point used by tool-event tests. */
-	protected handleEvent(event: CodexJsonEvent): void {
-		this.emit("streamEvent", event);
-		const normalized = normalizeExecEvent(event);
-		if (normalized) {
-			this.mapper.handle(normalized);
-		}
+	protected handleEvent(event: NormalizedCodexEvent): void {
+		this.mapper.handle(event);
 	}
 }

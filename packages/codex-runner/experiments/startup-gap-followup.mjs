@@ -13,7 +13,6 @@ writeFileSync(join(wd, "README.md"), "# x\n");
 
 const runner = new CodexRunner({
   workingDirectory: wd, cyrusHome: join(process.env.HOME, ".cyrus"),
-  sandbox: "read-only", useAppServer: true,
 });
 const texts = [];
 runner.on("message", (m) => {

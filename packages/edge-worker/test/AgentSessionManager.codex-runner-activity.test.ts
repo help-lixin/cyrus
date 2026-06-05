@@ -51,7 +51,7 @@ describe("AgentSessionManager - Codex tool activity mapping", () => {
 
 	it("creates Linear action entries for Codex file_change events", async () => {
 		(runner as any).handleEvent({
-			type: "item.completed",
+			kind: "item-completed",
 			item: {
 				id: "patch_1",
 				type: "file_change",

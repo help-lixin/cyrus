@@ -10,11 +10,10 @@ import type { CodexConfigOverrides } from "../types.js";
 /**
  * Backend-neutral item shape consumed by {@link CodexEventMapper}.
  *
- * The field names deliberately mirror the Codex SDK `exec` (`ThreadItem`) shape
- * so the {@link ExecCodexBackend} can forward SDK items with zero translation,
- * while the {@link AppServerCodexBackend} translates the app-server protocol's
- * camelCase item payloads into this same shape. The mapper depends only on this
- * type — never on a concrete transport's wire format (Dependency Inversion).
+ * The {@link AppServerCodexBackend} translates the app-server protocol's
+ * camelCase item payloads into this normalized shape. The mapper depends only
+ * on this type — never on a concrete transport's wire format (Dependency
+ * Inversion).
  */
 export type NormalizedCodexItem =
 	| { type: "agent_message"; id: string; text: string }

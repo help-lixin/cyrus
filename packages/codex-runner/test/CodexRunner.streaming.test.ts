@@ -41,46 +41,18 @@ function attachRunning(runner: CodexRunner, backend: FakeBackend): void {
 }
 
 describe("CodexRunner streaming input selection", () => {
-	it("does not support streaming input with the default (exec) backend", () => {
+	it("always supports streaming input (Codex runs via app-server)", () => {
 		const runner = new CodexRunner({
 			workingDirectory: "/tmp",
 			cyrusHome: "/tmp",
-		});
-		expect(runner.supportsStreamingInput).toBe(false);
-		expect(() => runner.addStreamMessage("hi")).toThrow(
-			/does not support streaming input/i,
-		);
-	});
-
-	it("supports streaming input when useAppServer is set", () => {
-		const runner = new CodexRunner({
-			workingDirectory: "/tmp",
-			cyrusHome: "/tmp",
-			useAppServer: true,
 		});
 		expect(runner.supportsStreamingInput).toBe(true);
-	});
-
-	it("honors the CODEX_USE_APP_SERVER env flag", () => {
-		const prev = process.env.CODEX_USE_APP_SERVER;
-		process.env.CODEX_USE_APP_SERVER = "1";
-		try {
-			const runner = new CodexRunner({
-				workingDirectory: "/tmp",
-				cyrusHome: "/tmp",
-			});
-			expect(runner.supportsStreamingInput).toBe(true);
-		} finally {
-			if (prev === undefined) delete process.env.CODEX_USE_APP_SERVER;
-			else process.env.CODEX_USE_APP_SERVER = prev;
-		}
 	});
 
 	it("steers the active turn when a stream message arrives mid-turn", () => {
 		const runner = new CodexRunner({
 			workingDirectory: "/tmp",
 			cyrusHome: "/tmp",
-			useAppServer: true,
 		});
 		const backend = new FakeBackend({ supportsSteer: true, active: true });
 		attachRunning(runner, backend);
@@ -98,7 +70,6 @@ describe("CodexRunner streaming input selection", () => {
 		const runner = new CodexRunner({
 			workingDirectory: "/tmp",
 			cyrusHome: "/tmp",
-			useAppServer: true,
 		});
 		// Running, but the turn has not started yet (startup gap).
 		const backend = new FakeBackend({ supportsSteer: true, active: false });
@@ -130,7 +101,6 @@ describe("CodexRunner streaming input selection", () => {
 		const runner = new CodexRunner({
 			workingDirectory: "/tmp",
 			cyrusHome: "/tmp",
-			useAppServer: true,
 		});
 		const backend = new FakeBackend({ supportsSteer: true, active: false });
 		attachRunning(runner, backend);
