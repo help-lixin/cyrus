@@ -58,6 +58,7 @@ interface ToolProjection {
 
 const DEFAULT_CODEX_MODEL = "gpt-5.5";
 const CODEX_MCP_DOCS_URL = "https://platform.openai.com/docs/docs-mcp";
+const DEFAULT_CODEX_SANDBOX_MODE = "danger-full-access" as const;
 
 function toFiniteNumber(value: number | undefined): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -589,7 +590,7 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 
 		const threadOptions: ThreadOptions = {
 			model: this.config.model,
-			sandboxMode: this.config.sandbox || "workspace-write",
+			sandboxMode: this.config.sandbox ?? DEFAULT_CODEX_SANDBOX_MODE,
 			workingDirectory: this.config.workingDirectory,
 			skipGitRepoCheck: this.config.skipGitRepoCheck ?? true,
 			approvalPolicy: this.config.askForApproval || "never",
@@ -775,23 +776,24 @@ export class CodexRunner extends EventEmitter implements IAgentRunner {
 			}
 		}
 
-		const sandboxWorkspaceWrite = configOverrides.sandbox_workspace_write;
-		// Keep workspace-write as the default sandbox, but enable outbound network so
-		// common remote workflows (for example `git`/`gh` against GitHub) work without
-		// requiring danger-full-access.
-		if (
-			sandboxWorkspaceWrite &&
-			typeof sandboxWorkspaceWrite === "object" &&
-			!Array.isArray(sandboxWorkspaceWrite)
-		) {
-			configOverrides.sandbox_workspace_write = {
-				...sandboxWorkspaceWrite,
-				network_access:
-					(sandboxWorkspaceWrite as { network_access?: boolean })
-						.network_access ?? true,
-			};
-		} else if (!sandboxWorkspaceWrite) {
-			configOverrides.sandbox_workspace_write = { network_access: true };
+		if (this.config.sandbox === "workspace-write") {
+			const sandboxWorkspaceWrite = configOverrides.sandbox_workspace_write;
+			// When Cyrus explicitly enables the Codex workspace sandbox, keep outbound
+			// network available so common remote workflows like git/gh continue to work.
+			if (
+				sandboxWorkspaceWrite &&
+				typeof sandboxWorkspaceWrite === "object" &&
+				!Array.isArray(sandboxWorkspaceWrite)
+			) {
+				configOverrides.sandbox_workspace_write = {
+					...sandboxWorkspaceWrite,
+					network_access:
+						(sandboxWorkspaceWrite as { network_access?: boolean })
+							.network_access ?? true,
+				};
+			} else if (!sandboxWorkspaceWrite) {
+				configOverrides.sandbox_workspace_write = { network_access: true };
+			}
 		}
 
 		if (!appendSystemPrompt) {

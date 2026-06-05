@@ -10,6 +10,7 @@ import type {
 	SdkPluginConfig,
 	StopHookInput,
 } from "cyrus-claude-runner";
+import type { CodexRunnerConfig } from "cyrus-codex-runner";
 import type {
 	AgentRunnerConfig,
 	CyrusAgentSession,
@@ -431,6 +432,10 @@ export class RunnerConfigBuilder {
 			}
 		}
 
+		if (runnerType === "codex") {
+			config.sandbox = this.buildCodexSandboxMode(input);
+		}
+
 		if (input.resumeSessionId) {
 			config.resumeSessionId = input.resumeSessionId;
 		}
@@ -440,6 +445,14 @@ export class RunnerConfigBuilder {
 		}
 
 		return { config, runnerType };
+	}
+
+	private buildCodexSandboxMode(
+		input: IssueRunnerConfigInput,
+	): NonNullable<CodexRunnerConfig["sandbox"]> {
+		return input.sandboxSettings?.enabled === true
+			? "workspace-write"
+			: "danger-full-access";
 	}
 
 	/**
