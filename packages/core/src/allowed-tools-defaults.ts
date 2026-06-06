@@ -33,8 +33,6 @@ export const LINEAR_DEFAULT_ALLOWED_TOOLS = [
 	"Read",
 	"Edit",
 	"Write",
-	"Glob",
-	"Grep",
 	"NotebookEdit",
 
 	// Execution
@@ -73,6 +71,7 @@ export const LINEAR_DEFAULT_ALLOWED_TOOLS = [
 	// Monitoring + discovery
 	"Monitor",
 	"LSP",
+	"RemoteTrigger",
 	"ToolSearch",
 	"Skill",
 
@@ -105,8 +104,6 @@ export const LINEAR_DEFAULT_ALLOWED_TOOLS = [
 export const SLACK_DEFAULT_ALLOWED_TOOLS = [
 	// Read access to configured repository paths
 	"Read",
-	"Glob",
-	"Grep",
 	"Bash(git -C * pull)",
 
 	// Web
@@ -131,6 +128,7 @@ export const SLACK_DEFAULT_ALLOWED_TOOLS = [
 
 	// Discovery
 	"Monitor",
+	"RemoteTrigger",
 	"Skill",
 	"ToolSearch",
 
@@ -158,8 +156,6 @@ export const GITHUB_DEFAULT_ALLOWED_TOOLS = [
 	"Read",
 	"Edit",
 	"Write",
-	"Glob",
-	"Grep",
 	"NotebookEdit",
 
 	// Execution
@@ -198,6 +194,7 @@ export const GITHUB_DEFAULT_ALLOWED_TOOLS = [
 	// Monitoring + discovery
 	"Monitor",
 	"LSP",
+	"RemoteTrigger",
 	"ToolSearch",
 	"Skill",
 
