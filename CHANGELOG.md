@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
-- Updated `@anthropic-ai/claude-agent-sdk` from 0.3.159 to 0.3.167 and `@anthropic-ai/sdk` to 0.101.0. Removes `Glob` and `Grep` from the allowed-tool lists (now embedded in Claude Code's native search as of v0.3.162; no longer discrete tools). Adds `RemoteTrigger` to all platform default allowed-tool lists. ([CYPACK-1292](https://linear.app/ceedar/issue/CYPACK-1292), [#PLACEHOLDER](https://github.com/cyrusagents/cyrus/pull/PLACEHOLDER))
+- Updated `@anthropic-ai/claude-agent-sdk` from 0.3.159 to 0.3.167 and `@anthropic-ai/sdk` to 0.101.0. Removes `Glob` and `Grep` from the allowed-tool lists (now embedded in Claude Code's native search as of v0.3.162; no longer discrete tools). Adds `RemoteTrigger` to all platform default allowed-tool lists. ([CYPACK-1292](https://linear.app/ceedar/issue/CYPACK-1292), [#1297](https://github.com/cyrusagents/cyrus/pull/1297))
 
 ### Security
 - Patched Hono dependency advisories reported by Dependabot so `pnpm audit` is clean for the Cyrus CLI workspace. ([CYPACK-1290](https://linear.app/ceedar/issue/CYPACK-1290), [#1295](https://github.com/cyrusagents/cyrus/pull/1295))
