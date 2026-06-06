@@ -37,6 +37,75 @@ import type {
 // biome-ignore lint/complexity/noBannedTypes: Empty events type (events removed in CYPACK-996 skill refactor)
 export type AgentSessionManagerEvents = {};
 
+function toFiniteNumber(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function formatUsd(amount: number): string {
+	if (amount > 0 && amount < 0.0001) {
+		return "<$0.0001";
+	}
+
+	return `$${amount.toFixed(4)}`;
+}
+
+function formatTokenCount(count: number): string {
+	return new Intl.NumberFormat("en-US").format(count);
+}
+
+function formatSessionUsageFooter(resultMessage: SDKResultMessage): string {
+	if (resultMessage.is_error) {
+		return "";
+	}
+
+	const usage = resultMessage.usage;
+	const totalCostUsd = toFiniteNumber(resultMessage.total_cost_usd);
+	const inputTokens = toFiniteNumber(usage?.input_tokens);
+	const outputTokens = toFiniteNumber(usage?.output_tokens);
+	const cacheWriteTokens = toFiniteNumber(usage?.cache_creation_input_tokens);
+	const cacheReadTokens = toFiniteNumber(usage?.cache_read_input_tokens);
+
+	const tokenParts = [
+		inputTokens > 0 ? `${formatTokenCount(inputTokens)} input` : undefined,
+		outputTokens > 0 ? `${formatTokenCount(outputTokens)} output` : undefined,
+		cacheWriteTokens > 0
+			? `${formatTokenCount(cacheWriteTokens)} cache write`
+			: undefined,
+		cacheReadTokens > 0
+			? `${formatTokenCount(cacheReadTokens)} cache read`
+			: undefined,
+	].filter(Boolean);
+
+	if (totalCostUsd <= 0 && tokenParts.length === 0) {
+		return "";
+	}
+
+	const lines = ["---"];
+	if (totalCostUsd > 0) {
+		lines.push(`**Session usage**: ~${formatUsd(totalCostUsd)} API cost`);
+	} else {
+		lines.push("**Session usage**: API cost unavailable from runner");
+	}
+
+	if (tokenParts.length > 0) {
+		lines.push(`**Tokens**: ${tokenParts.join(", ")}`);
+	}
+
+	return lines.join("\n");
+}
+
+function appendSessionUsageFooter(
+	content: string,
+	resultMessage: SDKResultMessage,
+): string {
+	const usageFooter = formatSessionUsageFooter(resultMessage);
+	if (!usageFooter) {
+		return content;
+	}
+
+	return content ? `${content}\n\n${usageFooter}` : usageFooter;
+}
+
 /**
  * Type-safe event emitter interface for AgentSessionManager
  */
@@ -664,6 +733,8 @@ export class AgentSessionManager extends EventEmitter {
 						: ""))
 		).trim();
 
+		const finalContent = appendSessionUsageFooter(content, resultMessage);
+
 		const resultEntry: CyrusAgentSessionEntry = {
 			// Set the appropriate session ID based on runner type
 			...(runnerType === "gemini"
@@ -674,7 +745,7 @@ export class AgentSessionManager extends EventEmitter {
 						? { cursorSessionId: resultMessage.session_id }
 						: { claudeSessionId: resultMessage.session_id }),
 			type: "result",
-			content,
+			content: finalContent,
 			metadata: {
 				timestamp: Date.now(),
 				durationMs: resultMessage.duration_ms,
@@ -1418,7 +1489,7 @@ export class AgentSessionManager extends EventEmitter {
 		const log = this.sessionLog(sessionId);
 		const session = this.sessions.get(sessionId);
 
-		if (!session || !session.externalSessionId) {
+		if (!session?.externalSessionId) {
 			log.debug(
 				`Skipping ${label} - no external session ID (platform: ${session?.issueContext?.trackerId || "unknown"})`,
 			);
@@ -1681,7 +1752,7 @@ export class AgentSessionManager extends EventEmitter {
 		message: SDKStatusMessage,
 	): Promise<void> {
 		const session = this.sessions.get(sessionId);
-		if (!session || !session.externalSessionId) {
+		if (!session?.externalSessionId) {
 			const log = this.sessionLog(sessionId);
 			log.debug(
 				`Skipping status message - no external session ID (platform: ${session?.issueContext?.trackerId || "unknown"})`,
