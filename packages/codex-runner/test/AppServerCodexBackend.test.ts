@@ -47,7 +47,9 @@ class FakeClient extends EventEmitter implements IAppServerClient {
 		this.requests.push({ method, params });
 		const response = this.responses[method];
 		return Promise.resolve(
-			(typeof response === "function" ? response(params) : (response ?? {})) as T,
+			(typeof response === "function"
+				? response(params)
+				: (response ?? {})) as T,
 		);
 	}
 	close(): Promise<void> {
@@ -371,7 +373,9 @@ describe("AppServerCodexBackend", () => {
 			const threadId = (params as { threadId?: string }).threadId;
 			return { turn: { id: threadId === "thread-A" ? "turn-A" : "turn-B" } };
 		};
-		const manager = new AppServerProcessManager(() => client, { idleCloseMs: 0 });
+		const manager = new AppServerProcessManager(() => client, {
+			idleCloseMs: 0,
+		});
 		const backendA = new AppServerCodexBackend(manager);
 		const backendB = new AppServerCodexBackend(manager);
 		const eventsA: NormalizedCodexEvent[] = [];
@@ -382,9 +386,9 @@ describe("AppServerCodexBackend", () => {
 		await backendA.open({ ...baseConfig, codexPath: "/bin/true" });
 		await backendB.open({ ...baseConfig, codexPath: "/bin/true" });
 		expect(client.startCalls).toBe(1);
-		expect(client.requests.filter((r) => r.method === "initialize")).toHaveLength(
-			1,
-		);
+		expect(
+			client.requests.filter((r) => r.method === "initialize"),
+		).toHaveLength(1);
 
 		const turnA = backendA.runTurn([{ type: "text", text: "A" }]);
 		const turnB = backendB.runTurn([{ type: "text", text: "B" }]);

@@ -6,8 +6,8 @@ import {
 	translateAppServerItem,
 } from "./appServerEvents.js";
 import {
-	AppServerProcessManager,
 	type AppServerProcessLease,
+	AppServerProcessManager,
 	type AppServerThreadHandler,
 	defaultAppServerProcessManager,
 } from "./appServerProcess.js";

@@ -35,61 +35,49 @@ interface LaunchOptions {
 }
 
 /**
- * Owns the single Codex app-server process for this Node process. Individual
- * CodexRunner instances acquire lightweight leases and open separate app-server
- * threads over the shared JSON-RPC connection.
+ * A single shared Codex app-server process serving every thread that shares an
+ * identical launch configuration (command + args + env). Individual
+ * CodexRunner threads acquire lightweight leases over the one JSON-RPC
+ * connection; notifications are fanned out to the owning thread by `threadId`.
+ * The process is torn down once the last lease is released (after an idle grace
+ * period) or when the process exits.
  */
-export class AppServerProcessManager {
+class PooledAppServerProcess {
 	private client: IAppServerClient | null = null;
-	private launchKey: string | null = null;
 	private startPromise: Promise<void> | null = null;
 	private leaseCount = 0;
+	private disposed = false;
 	private idleTimer: ReturnType<typeof setTimeout> | null = null;
 	private readonly threadHandlers = new Map<string, AppServerThreadHandler>();
-	private readonly requestTimeoutMs: number | undefined;
-	private readonly idleCloseMs: number;
 
 	constructor(
-		private readonly clientFactory: AppServerClientFactory = (options) =>
-			new AppServerClient(options),
-		options?: AppServerProcessManagerOptions,
-	) {
-		this.requestTimeoutMs = options?.requestTimeoutMs;
-		this.idleCloseMs = options?.idleCloseMs ?? DEFAULT_IDLE_CLOSE_MS;
+		private readonly launchOptions: LaunchOptions,
+		private readonly clientFactory: AppServerClientFactory,
+		private readonly idleCloseMs: number,
+		/** Called when this process is fully torn down so the pool can drop it. */
+		private readonly onDisposed: () => void,
+	) {}
+
+	/** Whether this process has been torn down and must not be reused. */
+	isDisposed(): boolean {
+		return this.disposed;
 	}
 
-	async acquire(config: ResolvedCodexConfig): Promise<AppServerProcessLease> {
-		const { command, args } = resolveCodexAppServerLaunch(config.codexPath);
-		const launchOptions: LaunchOptions = {
-			command,
-			args,
-			...(config.env ? { env: config.env } : {}),
-			...(this.requestTimeoutMs !== undefined
-				? { requestTimeoutMs: this.requestTimeoutMs }
-				: {}),
-		};
-		const launchKey = buildLaunchKey(launchOptions);
-
-		if (this.launchKey && this.launchKey !== launchKey && this.leaseCount === 0) {
-			await this.closeAll();
-		}
-		if (this.launchKey && this.launchKey !== launchKey) {
+	async acquireLease(): Promise<AppServerProcessLease> {
+		if (this.disposed) {
 			throw new Error(
-				"Cannot start Codex thread: shared app-server is already running with different launch options",
+				"Cannot acquire a lease on a disposed app-server process",
 			);
 		}
-
 		this.leaseCount += 1;
 		this.clearIdleTimer();
 
 		let released = false;
 		try {
-			await this.ensureStarted(launchOptions, launchKey);
+			await this.ensureStarted();
 		} catch (error) {
-			if (!released) {
-				released = true;
-				this.releaseRef();
-			}
+			released = true;
+			this.releaseRef();
 			throw error;
 		}
 
@@ -127,21 +115,14 @@ export class AppServerProcessManager {
 		};
 	}
 
-	async closeAll(): Promise<void> {
-		this.clearIdleTimer();
-		this.threadHandlers.clear();
-		this.leaseCount = 0;
-		this.launchKey = null;
-		this.startPromise = null;
+	async close(): Promise<void> {
+		this.markDisposed();
 		const client = this.client;
 		this.client = null;
 		await client?.close();
 	}
 
-	private async ensureStarted(
-		options: LaunchOptions,
-		launchKey: string,
-	): Promise<void> {
+	private async ensureStarted(): Promise<void> {
 		if (this.client) {
 			return;
 		}
@@ -151,15 +132,14 @@ export class AppServerProcessManager {
 		}
 
 		const client = this.clientFactory({
-			binaryPath: options.command,
-			args: options.args,
-			...(options.env ? { env: options.env } : {}),
-			...(options.requestTimeoutMs !== undefined
-				? { requestTimeoutMs: options.requestTimeoutMs }
+			binaryPath: this.launchOptions.command,
+			args: this.launchOptions.args,
+			...(this.launchOptions.env ? { env: this.launchOptions.env } : {}),
+			...(this.launchOptions.requestTimeoutMs !== undefined
+				? { requestTimeoutMs: this.launchOptions.requestTimeoutMs }
 				: {}),
 		});
 		this.client = client;
-		this.launchKey = launchKey;
 
 		client.setNotificationHandler((method, params) =>
 			this.routeNotification(method, params),
@@ -169,18 +149,17 @@ export class AppServerProcessManager {
 		client.on("error", (error) => this.onProcessError(error));
 		client.start();
 
-		let startPromise: Promise<void>;
-		startPromise = client
+		const startPromise = client
 			.request("initialize", {
 				clientInfo: CLIENT_INFO,
 				capabilities: { experimentalApi: true },
 			})
 			.then(() => undefined)
 			.catch((error) => {
+				// Failed to initialize — tear down so the pool re-creates cleanly.
 				if (this.client === client) {
 					this.client = null;
-					this.launchKey = null;
-					this.threadHandlers.clear();
+					this.markDisposed();
 				}
 				throw error;
 			})
@@ -195,10 +174,19 @@ export class AppServerProcessManager {
 
 	private routeNotification(method: string, params: unknown): void {
 		const threadId = extractThreadId(params);
-		if (!threadId) {
+		if (threadId) {
+			this.threadHandlers.get(threadId)?.onNotification(method, params);
 			return;
 		}
-		this.threadHandlers.get(threadId)?.onNotification(method, params);
+		// No threadId on the notification. When exactly one thread is registered
+		// the target is unambiguous, so deliver it (robust against any
+		// notification type that omits the id). With multiple threads we cannot
+		// safely attribute it, so drop it rather than risk cross-thread delivery.
+		if (this.threadHandlers.size === 1) {
+			for (const handler of this.threadHandlers.values()) {
+				handler.onNotification(method, params);
+			}
+		}
 	}
 
 	private onServerRequest(method: string): unknown {
@@ -215,11 +203,8 @@ export class AppServerProcessManager {
 
 	private onProcessGone(): void {
 		const handlers = [...new Set(this.threadHandlers.values())];
-		this.threadHandlers.clear();
+		this.markDisposed();
 		this.client = null;
-		this.launchKey = null;
-		this.startPromise = null;
-		this.clearIdleTimer();
 		for (const handler of handlers) {
 			handler.onProcessGone();
 		}
@@ -240,15 +225,18 @@ export class AppServerProcessManager {
 
 	private scheduleIdleClose(): void {
 		this.clearIdleTimer();
-		if (!this.client) {
+		if (!this.client || this.disposed) {
 			return;
 		}
 		if (this.idleCloseMs <= 0) {
-			void this.closeAll();
+			void this.close();
 			return;
 		}
 		this.idleTimer = setTimeout(() => {
-			void this.closeAll();
+			// A lease may have been re-acquired during the grace period.
+			if (this.leaseCount === 0) {
+				void this.close();
+			}
 		}, this.idleCloseMs);
 		this.idleTimer.unref?.();
 	}
@@ -258,6 +246,81 @@ export class AppServerProcessManager {
 			clearTimeout(this.idleTimer);
 			this.idleTimer = null;
 		}
+	}
+
+	/** Tear down per-process state exactly once and notify the pool. */
+	private markDisposed(): void {
+		if (this.disposed) {
+			return;
+		}
+		this.disposed = true;
+		this.clearIdleTimer();
+		this.threadHandlers.clear();
+		this.startPromise = null;
+		this.onDisposed();
+	}
+}
+
+/**
+ * Owns Codex app-server processes for this Node process, pooled by launch
+ * configuration. Threads that share an identical launch config (command + args
+ * + env) reuse one process; threads with a different config get their own,
+ * rather than failing. This keeps the startup-cost savings of sharing while
+ * supporting heterogeneous concurrent sessions and confining a process crash to
+ * the threads that share that exact configuration.
+ */
+export class AppServerProcessManager {
+	private readonly processes = new Map<string, PooledAppServerProcess>();
+	private readonly requestTimeoutMs: number | undefined;
+	private readonly idleCloseMs: number;
+
+	constructor(
+		private readonly clientFactory: AppServerClientFactory = (options) =>
+			new AppServerClient(options),
+		options?: AppServerProcessManagerOptions,
+	) {
+		this.requestTimeoutMs = options?.requestTimeoutMs;
+		this.idleCloseMs = options?.idleCloseMs ?? DEFAULT_IDLE_CLOSE_MS;
+	}
+
+	async acquire(config: ResolvedCodexConfig): Promise<AppServerProcessLease> {
+		const { command, args } = resolveCodexAppServerLaunch(config.codexPath);
+		const launchOptions: LaunchOptions = {
+			command,
+			args,
+			...(config.env ? { env: config.env } : {}),
+			...(this.requestTimeoutMs !== undefined
+				? { requestTimeoutMs: this.requestTimeoutMs }
+				: {}),
+		};
+		const launchKey = buildLaunchKey(launchOptions);
+
+		let proc = this.processes.get(launchKey);
+		if (!proc || proc.isDisposed()) {
+			const created = new PooledAppServerProcess(
+				launchOptions,
+				this.clientFactory,
+				this.idleCloseMs,
+				() => {
+					// Only drop the entry if it still points at this instance — a
+					// replacement may already have taken its place.
+					if (this.processes.get(launchKey) === created) {
+						this.processes.delete(launchKey);
+					}
+				},
+			);
+			this.processes.set(launchKey, created);
+			proc = created;
+		}
+
+		return proc.acquireLease();
+	}
+
+	/** Tear down every pooled process (e.g. on shutdown or in tests). */
+	async closeAll(): Promise<void> {
+		const processes = [...this.processes.values()];
+		this.processes.clear();
+		await Promise.all(processes.map((proc) => proc.close()));
 	}
 }
 
