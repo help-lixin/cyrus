@@ -73,11 +73,13 @@ function buildIssueConfig(extra: Partial<IssueRunnerConfigInput> = {}) {
 }
 
 describe("RunnerConfigBuilder GitHub token session env (CYHOST-913)", () => {
-	it("exposes GH_TOKEN and CYRUS_GH_TOKEN when a githubToken is provided", () => {
+	it("exposes ONLY CYRUS_GH_TOKEN when a githubToken is provided", () => {
 		const { config } = buildIssueConfig({ githubToken: "ghs_org_token" });
 
+		// Never GH_TOKEN: customers set their own GH_TOKEN (e.g. private npm
+		// registries on GitHub Packages) and Cyrus must not clobber it. The
+		// droplet's gh wrapper maps CYRUS_GH_TOKEN to GH_TOKEN for gh only.
 		expect(config.additionalEnv).toEqual({
-			GH_TOKEN: "ghs_org_token",
 			CYRUS_GH_TOKEN: "ghs_org_token",
 		});
 	});
@@ -96,7 +98,7 @@ describe("RunnerConfigBuilder GitHub token session env (CYHOST-913)", () => {
 		});
 
 		const env = config.additionalEnv as Record<string, string>;
-		expect(env.GH_TOKEN).toBe("ghs_org_token");
+		expect(env.GH_TOKEN).toBeUndefined();
 		expect(env.CYRUS_GH_TOKEN).toBe("ghs_org_token");
 		// Sandbox CA cert env vars survive the merge
 		expect(env.NODE_EXTRA_CA_CERTS).toBe("/tmp/ca.pem");

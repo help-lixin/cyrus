@@ -152,8 +152,12 @@ export interface IssueRunnerConfigInput {
 	/**
 	 * GitHub App installation token matched to the session repository's org
 	 * (from the cyrus-hosted-pushed token store). When set, it's exposed to
-	 * the session as `GH_TOKEN` and `CYRUS_GH_TOKEN` so the `gh` CLI and
-	 * other tooling authenticate against the right GitHub org.
+	 * the session ONLY as `CYRUS_GH_TOKEN` — the droplet's gh wrapper maps
+	 * it to `GH_TOKEN` inside the gh process. We deliberately do NOT set
+	 * `GH_TOKEN` itself: customers set their own `GH_TOKEN` (e.g. for
+	 * private npm registries on GitHub Packages) and clobbering it would
+	 * break their installs. Bare `gh` with no env var is covered by the
+	 * `gh auth login` the github-tokens push handler performs.
 	 */
 	githubToken?: string;
 }
@@ -425,11 +429,13 @@ export class RunnerConfigBuilder {
 		// Expose the org-matched GitHub App installation token to the session
 		// env. Merged on top of any sandbox additionalEnv (CA cert vars) so
 		// both survive. Only set when a token store entry matched the repo's
-		// org — sessions without a match see zero env change.
+		// org — sessions without a match see zero env change. CYRUS_GH_TOKEN
+		// only — never GH_TOKEN, which customers set themselves (e.g. private
+		// npm registries on GitHub Packages); the droplet's gh wrapper maps
+		// CYRUS_GH_TOKEN to GH_TOKEN inside the gh process.
 		if (input.githubToken) {
 			config.additionalEnv = {
 				...config.additionalEnv,
-				GH_TOKEN: input.githubToken,
 				CYRUS_GH_TOKEN: input.githubToken,
 			};
 		}
