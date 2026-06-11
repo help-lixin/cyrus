@@ -21,6 +21,7 @@ import { getCyrusAppUrl } from "cyrus-cloudflare-tunnel-client";
 import { CodexRunner } from "cyrus-codex-runner";
 import {
 	ConfigUpdater,
+	ensureGhTokenResolver,
 	ensureGitHubCredentialHelper,
 } from "cyrus-config-updater";
 import type {
@@ -626,21 +627,23 @@ export class EdgeWorker extends EventEmitter {
 	 * Start the edge worker
 	 */
 	async start(): Promise<void> {
-		// If cyrus-hosted has pushed per-org GitHub App tokens previously, make
-		// sure the git credential helper is wired up (idempotent). Covers the
-		// case where the process restarted after the helper config was wiped.
+		// If cyrus-hosted has pushed GitHub/GitLab provider tokens previously,
+		// make sure the git credential helper and per-invocation gh token
+		// resolver are wired up (idempotent). Covers the case where the process
+		// restarted after the helper config was wiped.
 		if (
 			existsSync(this.githubTokenStore.filePath) ||
 			existsSync(this.gitProviderTokenStore.filePath)
 		) {
 			try {
 				ensureGitHubCredentialHelper(this.cyrusHome);
+				ensureGhTokenResolver(this.cyrusHome);
 				this.logger.info(
-					"✅ Git credential helper configured from existing token store",
+					"✅ Git provider auth scripts configured from existing token store",
 				);
 			} catch (error) {
 				this.logger.warn(
-					"Failed to configure GitHub credential helper on startup (non-fatal):",
+					"Failed to configure GitHub auth scripts on startup (non-fatal):",
 					error instanceof Error ? error : new Error(String(error)),
 				);
 			}
