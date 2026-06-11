@@ -77,6 +77,9 @@ describe("handleGitHubTokens", () => {
 		const response = await handleGitHubTokens(validPayload(), cyrusHome);
 		expect(response.success).toBe(true);
 
+		// The per-invocation gh token resolver is installed alongside.
+		expect(existsSync(join(cyrusHome, "scripts", "gh-cyrus.cjs"))).toBe(true);
+
 		const scriptPath = join(cyrusHome, "scripts", "git-credential-cyrus.cjs");
 		expect(existsSync(scriptPath)).toBe(true);
 		// Executable bit set
@@ -245,6 +248,19 @@ exec env -u GITHUB_TOKEN -u GH_TOKEN /usr/bin/gh "$@"
 		expect(updated).toContain('GH_TOKEN="$CYRUS_GH_TOKEN"');
 		expect(updated).toContain("-u GITHUB_TOKEN");
 		expect(statSync(wrapperPath).mode & 0o111).not.toBe(0);
+	});
+
+	it("upgrades the interim CYRUS_GH_TOKEN-only wrapper to the resolver", () => {
+		const interim = `#!/usr/bin/env bash
+if [ -n "\${CYRUS_GH_TOKEN:-}" ]; then
+  exec env -u GITHUB_TOKEN GH_TOKEN="$CYRUS_GH_TOKEN" /usr/bin/gh "$@"
+fi
+exec env -u GITHUB_TOKEN -u GH_TOKEN /usr/bin/gh "$@"
+`;
+		const wrapperPath = writeWrapper(interim);
+
+		expect(ensureGhWrapperSupportsCyrusToken(home)).toBe(true);
+		expect(readFileSync(wrapperPath, "utf8")).toContain("gh-cyrus.cjs");
 	});
 
 	it("leaves an already-updated wrapper untouched", () => {

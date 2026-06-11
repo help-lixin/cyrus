@@ -17,12 +17,29 @@ import {
 	GitHubTokensPayloadSchema,
 } from "../types.js";
 
-/** Path of the bundled credential helper script within this package */
-function bundledHelperPath(): string {
+/** Path of a bundled script within this package's scripts/ directory */
+function bundledScriptPath(scriptName: string): string {
 	// Resolves from both src/handlers (tests) and dist/handlers (published)
-	// to <package root>/scripts/git-credential-cyrus.cjs.
+	// to <package root>/scripts/<scriptName>.
 	const here = dirname(fileURLToPath(import.meta.url));
-	return join(here, "..", "..", "scripts", "git-credential-cyrus.cjs");
+	return join(here, "..", "..", "scripts", scriptName);
+}
+
+/**
+ * Install the per-invocation gh token resolver to
+ * `<cyrusHome>/scripts/gh-cyrus.cjs`. The droplet's `~/.local/bin/gh`
+ * wrapper execs into it so each gh command authenticates with the
+ * installation token for the org it targets (explicit -R/--repo arg, else
+ * the cwd's origin remote) — required for multi-repo sessions that span
+ * GitHub orgs. Idempotent.
+ */
+export function ensureGhTokenResolver(cyrusHome: string): string {
+	const scriptDir = join(cyrusHome, "scripts");
+	const scriptDest = join(scriptDir, "gh-cyrus.cjs");
+	mkdirSync(scriptDir, { recursive: true });
+	copyFileSync(bundledScriptPath("gh-cyrus.cjs"), scriptDest);
+	chmodSync(scriptDest, 0o755);
+	return scriptDest;
 }
 
 /**
@@ -46,7 +63,7 @@ export function ensureGitHubCredentialHelper(cyrusHome: string): string {
 	const scriptDest = join(scriptDir, "git-credential-cyrus.cjs");
 
 	mkdirSync(scriptDir, { recursive: true });
-	copyFileSync(bundledHelperPath(), scriptDest);
+	copyFileSync(bundledScriptPath("git-credential-cyrus.cjs"), scriptDest);
 	chmodSync(scriptDest, 0o755);
 
 	const credentialKey = "credential.https://github.com";
@@ -73,17 +90,19 @@ export function ensureGitHubCredentialHelper(cyrusHome: string): string {
 }
 
 /**
- * Self-heal the droplet's `~/.local/bin/gh` wrapper to honor
- * `CYRUS_GH_TOKEN`.
+ * Self-heal the droplet's `~/.local/bin/gh` wrapper to exec the Cyrus gh
+ * token resolver.
  *
  * Droplet images bake a gh wrapper that strips injected GH_TOKEN /
- * GITHUB_TOKEN env vars. Newer images map a Cyrus-provided
- * `CYRUS_GH_TOKEN` to `GH_TOKEN` inside the gh process so sessions use the
- * token for their repository's org; droplets provisioned from older images
- * keep the strip-everything wrapper until rebuilt. Since the wrapper lives
- * in the cyrus user's home, rewrite it here on token pushes — making
- * per-org gh independent of the image rollout. No-op when no wrapper
- * exists (self-host) or it already handles CYRUS_GH_TOKEN.
+ * GITHUB_TOKEN env vars. The current design routes gh through
+ * `<cyrusHome>/scripts/gh-cyrus.cjs`, which resolves the installation
+ * token PER INVOCATION for the org the command targets (multi-repo
+ * sessions span orgs, so a session-wide token is not enough). Droplets
+ * provisioned from older images keep their baked wrapper until rebuilt;
+ * since the wrapper lives in the cyrus user's home, rewrite it here on
+ * token pushes — making per-org gh independent of the image rollout.
+ * No-op when no wrapper exists (self-host), it already execs the
+ * resolver, or it has an unrecognized shape.
  */
 export function ensureGhWrapperSupportsCyrusToken(
 	homeDir: string = homedir(),
@@ -92,13 +111,21 @@ export function ensureGhWrapperSupportsCyrusToken(
 	if (!existsSync(wrapperPath)) return false;
 
 	const current = readFileSync(wrapperPath, "utf8");
-	// Only rewrite the known droplet wrapper shape, and only when it
-	// predates CYRUS_GH_TOKEN support.
-	if (current.includes("CYRUS_GH_TOKEN") || !current.includes("/usr/bin/gh")) {
+	// Only rewrite the known droplet wrapper shapes (the original
+	// strip-everything wrapper and the interim CYRUS_GH_TOKEN one), and
+	// only when they predate the resolver.
+	if (current.includes("gh-cyrus.cjs") || !current.includes("/usr/bin/gh")) {
 		return false;
 	}
 
 	const updated = `#!/usr/bin/env bash
+# Cyrus-managed gh wrapper. The resolver picks the GitHub App installation
+# token for the org each command targets (multi-org support); without it,
+# strip injected tokens so gh falls back to its own stored auth.
+RESOLVER="$HOME/.cyrus/scripts/gh-cyrus.cjs"
+if [ -f "$RESOLVER" ]; then
+  exec node "$RESOLVER" "$@"
+fi
 if [ -n "\${CYRUS_GH_TOKEN:-}" ]; then
   exec env -u GITHUB_TOKEN GH_TOKEN="$CYRUS_GH_TOKEN" /usr/bin/gh "$@"
 fi
@@ -177,6 +204,16 @@ export async function handleGitHubTokens(
 			error: "Failed to configure git credential helper",
 			details: error instanceof Error ? error.message : String(error),
 		};
+	}
+
+	try {
+		ensureGhTokenResolver(cyrusHome);
+	} catch (error) {
+		// Non-fatal: gh falls back to CYRUS_GH_TOKEN / hosts.yml auth.
+		console.warn(
+			"[githubTokens] gh token resolver install failed:",
+			error instanceof Error ? error.message : String(error),
+		);
 	}
 
 	try {
