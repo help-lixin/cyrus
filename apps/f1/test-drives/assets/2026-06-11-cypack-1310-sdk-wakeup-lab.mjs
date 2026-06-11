@@ -27,11 +27,11 @@ class Input {
 	done = false;
 	push(m) {
 		this.queue.push(m);
-		this.waiters.splice(0).forEach((w) => w());
+		for (const w of this.waiters.splice(0)) w();
 	}
 	complete() {
 		this.done = true;
-		this.waiters.splice(0).forEach((w) => w());
+		for (const w of this.waiters.splice(0)) w();
 		log("input_completed", {});
 	}
 	async *[Symbol.asyncIterator]() {
