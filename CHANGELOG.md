@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- The `ScheduleWakeup` tool now works in Claude sessions: when an agent schedules a wakeup (or has session crons / background tasks in flight) at the end of a turn, Cyrus keeps the session alive so the wakeup actually fires, instead of shutting the Claude subprocess down and silently dropping the timer. Sessions with nothing pending still shut down at turn end to free memory. ([CYPACK-1310](https://linear.app/ceedar/issue/CYPACK-1310), [#1313](https://github.com/cyrusagents/cyrus/pull/1313))
+- Turns that end on a `ScheduleWakeup` call now post a readable "⏰ Wakeup scheduled" response to the Linear timeline instead of raw tool JSON, followed by a "⏳ Standing by" thought that lists everything the session is waiting on (wakeup times, recurring crons, background commands) and returns the Linear agent panel to its working state. ([CYPACK-1310](https://linear.app/ceedar/issue/CYPACK-1310), [#1313](https://github.com/cyrusagents/cyrus/pull/1313))
+
 ### Changed
 - Updated `@anthropic-ai/claude-agent-sdk` to `0.3.173` (parity with Claude Code v2.1.173; includes `skipMcpDiscovery` plugin option and fix for slash-followed-by-whitespace prompts). ([CYPACK-1306](https://linear.app/ceedar/issue/CYPACK-1306), [#1312](https://github.com/cyrusagents/cyrus/pull/1312))
 - Updated `@anthropic-ai/sdk` to `0.104.1` (latest), keeping Claude sessions on current Anthropic API capabilities. ([CYPACK-1303](https://linear.app/ceedar/issue/CYPACK-1303), [#1308](https://github.com/ceedaragents/cyrus/pull/1308))

@@ -7,9 +7,9 @@
 import { execSync } from "node:child_process";
 
 const SDK_PATH = process.env.SDK_PATH;
-const { query } = await import(SDK_PATH + "/sdk.mjs");
+const { query } = await import(`${SDK_PATH}/sdk.mjs`);
 
-const [name, wakeupArg, mode, holdMsArg] = process.argv.slice(2);
+const [_name, wakeupArg, mode, holdMsArg] = process.argv.slice(2);
 const WAKEUP = wakeupArg === "1";
 const HOLD_MS = Number(holdMsArg || 150000);
 const T0 = Date.now();
@@ -111,7 +111,7 @@ let closed = false;
 			if (m.subtype === "session_state_changed") summary.state = m.state;
 			if (m.type === "assistant")
 				summary.content = (m.message?.content || [])
-					.map((c) => c.type + (c.name ? ":" + c.name : ""))
+					.map((c) => c.type + (c.name ? `:${c.name}` : ""))
 					.join(",");
 			log("msg", summary);
 			if (m.type === "result") {

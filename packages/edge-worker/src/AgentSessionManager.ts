@@ -11,6 +11,7 @@ import type {
 	SDKUserMessage,
 } from "cyrus-claude-runner";
 import {
+	type AgentPendingWork,
 	AgentSessionStatus,
 	AgentSessionType,
 	type CyrusAgentSession,
@@ -25,6 +26,11 @@ import {
 	type Workspace,
 } from "cyrus-core";
 
+import {
+	formatPendingWorkThought,
+	formatScheduleWakeupResponse,
+	tryParseScheduleWakeupInput,
+} from "./PendingWorkFormatter.js";
 import type {
 	ActivityPostOptions,
 	ActivitySignal,
@@ -374,6 +380,25 @@ export class AgentSessionManager extends EventEmitter {
 		// Post final result to issue tracker
 		await this.addResultEntry(sessionId, resultMessage);
 
+		// When the turn ended with work still scheduled or in flight
+		// (ScheduleWakeup/cron timers, backgrounded tasks), the runner holds
+		// its session open and the wakeup will stream new messages in later.
+		// Post a thought AFTER the response so Linear's agent panel returns
+		// to its working state and the user can see what the session is
+		// waiting on.
+		if (resultMessage.subtype === "success") {
+			const pendingWork = this.getRunnerPendingWork(sessionId);
+			if (pendingWork) {
+				const thoughtBody = formatPendingWorkThought(pendingWork);
+				if (thoughtBody) {
+					await this.createThoughtActivity(sessionId, thoughtBody);
+					log.info(
+						`Posted pending-work thought (${pendingWork.sessionCrons.length} crons, ${pendingWork.backgroundTasks.length} background tasks)`,
+					);
+				}
+			}
+		}
+
 		// Handle child session completion
 		const parentSessionId = this.getParentSessionId?.(sessionId);
 		if (parentSessionId && this.resumeParentSession) {
@@ -381,6 +406,21 @@ export class AgentSessionManager extends EventEmitter {
 		}
 
 		log.info(`Session completed (subtype: ${resultMessage.subtype})`);
+	}
+
+	/**
+	 * Pending work (scheduled wakeups/crons, in-flight background tasks) for
+	 * the session's runner, or null when the runner doesn't support pending
+	 * work reporting or nothing is pending.
+	 */
+	private getRunnerPendingWork(sessionId: string): AgentPendingWork | null {
+		const runner = this.sessions.get(sessionId)?.agentRunner;
+		if (!runner?.getPendingWork) return null;
+		const pendingWork = runner.getPendingWork();
+		return pendingWork.sessionCrons.length > 0 ||
+			pendingWork.backgroundTasks.length > 0
+			? pendingWork
+			: null;
 	}
 
 	private consumeStopRequest(linearAgentActivitySessionId: string): boolean {
@@ -647,7 +687,7 @@ export class AgentSessionManager extends EventEmitter {
 		// (structured content) over result.result (plain-text duplicate).
 		const bufferedAssistant = this.lastAssistantBodyBySession.get(sessionId);
 		this.lastAssistantBodyBySession.delete(sessionId);
-		const content = (
+		let content = (
 			resultMessage.is_error
 				? resultMessage.is_error &&
 					"errors" in resultMessage &&
@@ -663,6 +703,22 @@ export class AgentSessionManager extends EventEmitter {
 						? resultMessage.result
 						: ""))
 		).trim();
+
+		// When the turn ended on a bare ScheduleWakeup call, the buffered
+		// "last assistant message" is the raw tool-input JSON (tool_use blocks
+		// are stringified by extractContent). Posting that as the Linear
+		// response is unreadable — render it as friendly wakeup prose instead.
+		// Gated on the runner actually reporting a pending cron so prose that
+		// merely looks like the JSON is never rewritten on a finished session.
+		if (!resultMessage.is_error) {
+			const pendingWork = this.getRunnerPendingWork(sessionId);
+			if (pendingWork && pendingWork.sessionCrons.length > 0) {
+				const wakeupInput = tryParseScheduleWakeupInput(content);
+				if (wakeupInput) {
+					content = formatScheduleWakeupResponse(wakeupInput);
+				}
+			}
+		}
 
 		const resultEntry: CyrusAgentSessionEntry = {
 			// Set the appropriate session ID based on runner type
@@ -1418,7 +1474,7 @@ export class AgentSessionManager extends EventEmitter {
 		const log = this.sessionLog(sessionId);
 		const session = this.sessions.get(sessionId);
 
-		if (!session || !session.externalSessionId) {
+		if (!session?.externalSessionId) {
 			log.debug(
 				`Skipping ${label} - no external session ID (platform: ${session?.issueContext?.trackerId || "unknown"})`,
 			);
@@ -1681,7 +1737,7 @@ export class AgentSessionManager extends EventEmitter {
 		message: SDKStatusMessage,
 	): Promise<void> {
 		const session = this.sessions.get(sessionId);
-		if (!session || !session.externalSessionId) {
+		if (!session?.externalSessionId) {
 			const log = this.sessionLog(sessionId);
 			log.debug(
 				`Skipping status message - no external session ID (platform: ${session?.issueContext?.trackerId || "unknown"})`,

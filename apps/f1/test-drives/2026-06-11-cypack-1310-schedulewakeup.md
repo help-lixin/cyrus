@@ -193,6 +193,34 @@ warm-mode-only support) and for Cyrus restarts (in-process timers die with
 the daemon either way, which still argues for EdgeWorker-level scheduling as
 the robust long-term design).
 
+## Addendum 2: Fix validation (Stop-hook approach, PR #1313)
+
+The fix implements the Stop-hook protocol: `ClaudeRunner` registers an
+internal Stop hook recording `session_crons`/`background_tasks`, and in cold
+mode only completes the streaming prompt on a success `result` when both are
+empty. `AgentSessionManager` formats wakeup-JSON responses readably and posts
+a "⏳ Standing by" thought after the response.
+
+Cold-mode F1 validation run (`CYRUS_ENABLE_WARM_SESSIONS` unset, port 3614):
+
+```
+13:12:21  action    ScheduleWakeup(delaySeconds=60) — turn ends ON the bare tool call
+13:12:23  log       pending_work_recorded {sessionCronCount: 1}
+13:12:24  log       session_held_open_for_pending_work {sessionCronCount: 1}
+13:12:24  response  "⏰ Wakeup scheduled — resuming in ~60s. > Cold-mode fix …"  (formatted, not raw JSON)
+13:12:24  thought   "⏳ Standing by — this session will wake automatically: - ⏰ W…"
+13:14:00  thought   wakeup FIRED (cold mode!) — new turn starts
+13:14:04  action    Write wakeup-fired.txt → contains FIRED
+13:14:09  thought   WAKEUP_OK
+```
+
+The previously-broken scenario now works end-to-end with warm sessions off.
+Unit coverage: `packages/claude-runner/test/pending-work-lifecycle.test.ts`
+(hold-open/complete decision against an SDK mock that reproduces the real
+hook-before-result ordering and stdin-EOF exit) and
+`packages/edge-worker/test/AgentSessionManager.pending-work.test.ts`
+(response formatting + standing-by thought ordering).
+
 ## Final Retrospective
 
 **Answer to CYPACK-1310: the intuition is correct.** ScheduleWakeup is NOT
