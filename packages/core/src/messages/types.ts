@@ -13,6 +13,7 @@ import type {
 	GitLabPlatformRef,
 	LinearPlatformRef,
 	SlackPlatformRef,
+	WeixinPlatformRef,
 } from "./platform-refs.js";
 
 // ============================================================================
@@ -34,7 +35,7 @@ export type MessageAction =
 /**
  * Platform source identifier.
  */
-export type MessageSource = "linear" | "github" | "gitlab" | "slack";
+export type MessageSource = "linear" | "github" | "gitlab" | "slack" | "weixin";
 
 // ============================================================================
 // AUTHOR TYPES
@@ -169,6 +170,18 @@ export interface SlackSessionStartPlatformData {
 }
 
 /**
+ * Weixin-specific platform data for session start.
+ */
+export interface WeixinSessionStartPlatformData {
+	/** Channel (user ID since 1:1 only) */
+	channel: WeixinPlatformRef["channel"];
+	/** Thread information */
+	thread: WeixinPlatformRef["thread"];
+	/** The message that triggered this session */
+	message: WeixinPlatformRef["message"];
+}
+
+/**
  * Session start message - initiates a new agent session.
  * Triggered by: Linear delegation, PR mention, thread start, etc.
  */
@@ -187,7 +200,8 @@ export interface SessionStartMessage extends InternalMessageBase {
 		| LinearSessionStartPlatformData
 		| GitHubSessionStartPlatformData
 		| GitLabSessionStartPlatformData
-		| SlackSessionStartPlatformData;
+		| SlackSessionStartPlatformData
+		| WeixinSessionStartPlatformData;
 }
 
 // ============================================================================
@@ -250,6 +264,18 @@ export interface SlackUserPromptPlatformData {
 }
 
 /**
+ * Weixin-specific platform data for user prompt.
+ */
+export interface WeixinUserPromptPlatformData {
+	/** Channel (user ID since 1:1 only) */
+	channel: WeixinPlatformRef["channel"];
+	/** Thread information */
+	thread: WeixinPlatformRef["thread"];
+	/** The message containing the prompt */
+	message: WeixinPlatformRef["message"];
+}
+
+/**
  * User prompt message - a user message during an active session.
  * Triggered by: Mid-session comments, follow-up questions, etc.
  */
@@ -262,7 +288,8 @@ export interface UserPromptMessage extends InternalMessageBase {
 		| LinearUserPromptPlatformData
 		| GitHubUserPromptPlatformData
 		| GitLabUserPromptPlatformData
-		| SlackUserPromptPlatformData;
+		| SlackUserPromptPlatformData
+		| WeixinUserPromptPlatformData;
 }
 
 // ============================================================================

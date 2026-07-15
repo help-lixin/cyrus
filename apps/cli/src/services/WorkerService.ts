@@ -246,6 +246,7 @@ export class WorkerService {
 			// User access control configuration
 			userAccessControl: edgeConfig.userAccessControl,
 			sandbox: edgeConfig.sandbox,
+			weixinEventTransport: edgeConfig.weixinEventTransport,
 			handlers: {
 				createWorkspace: async (
 					issue: Issue,
@@ -266,6 +267,10 @@ export class WorkerService {
 		};
 
 		// Create and start EdgeWorker
+		console.log(
+			"[WorkerService] config.weixinEventTransport:",
+			config.weixinEventTransport,
+		);
 		this.edgeWorker = new EdgeWorker(config);
 
 		// Set config path for dynamic reloading

@@ -139,6 +139,10 @@ import {
 	SlackEventTransport,
 	type SlackWebhookEvent,
 } from "cyrus-slack-event-transport";
+import {
+	WeixinEventTransport,
+	type WeixinParsedMessage,
+} from "cyrus-weixin-event-transport";
 import { Sessions, streamableHttp } from "fastify-mcp";
 import { ActivityPoster } from "./ActivityPoster.js";
 import { AgentSessionManager } from "./AgentSessionManager.js";
@@ -180,6 +184,7 @@ import { LinearActivitySink } from "./sinks/LinearActivitySink.js";
 import { ToolPermissionResolver } from "./ToolPermissionResolver.js";
 import type { AgentSessionData, EdgeWorkerEvents } from "./types.js";
 import { UserAccessControl } from "./UserAccessControl.js";
+import { WeixinChatAdapter } from "./WeixinChatAdapter.js";
 
 export declare interface EdgeWorker {
 	on<K extends keyof EdgeWorkerEvents>(
@@ -216,6 +221,10 @@ export class EdgeWorker extends EventEmitter {
 	private gitHubAppTokenProvider: GitHubAppTokenProvider | null = null; // Self-hosted GitHub App token minting
 	private gitLabEventTransport: GitLabEventTransport | null = null; // GitLab event transport for forwarded GitLab webhooks
 	private slackEventTransport: SlackEventTransport | null = null;
+	private weixinEventTransport: WeixinEventTransport | null = null;
+	private weixinChatAdapter: WeixinChatAdapter | null = null;
+	private weixinSessionHandler: ChatSessionHandler<WeixinParsedMessage> | null =
+		null;
 	private chatSessionHandler: ChatSessionHandler<SlackWebhookEvent> | null =
 		null;
 	private gitHubCommentService: GitHubCommentService; // Service for posting comments back to GitHub PRs
@@ -707,6 +716,46 @@ export class EdgeWorker extends EventEmitter {
 
 		// Start shared application server (this also starts Cloudflare tunnel if CLOUDFLARE_TOKEN is set)
 		await this.sharedApplicationServer.start();
+
+		// Start Weixin transport after server is ready (login is async and may require QR scan)
+		if (this.weixinEventTransport) {
+			this.startWeixinTransport().catch((error) => {
+				this.logger.error(
+					"Failed to start Weixin transport",
+					error instanceof Error ? error : new Error(String(error)),
+				);
+			});
+		}
+	}
+
+	/**
+	 * Start the Weixin transport (login + start polling).
+	 * This is called after the server is ready to allow time for QR code scanning.
+	 */
+	private async startWeixinTransport(): Promise<void> {
+		if (!this.weixinEventTransport) {
+			return;
+		}
+
+		try {
+			// Login (may require QR code scan - user has time since server is running)
+			await this.weixinEventTransport.login();
+
+			// Set the bot reference on the adapter for sending messages
+			if (this.weixinChatAdapter) {
+				this.weixinChatAdapter.setBot(this.weixinEventTransport.getBot());
+			}
+
+			// Start polling
+			this.weixinEventTransport.start();
+
+			this.logger.info("Weixin event transport started");
+		} catch (error) {
+			this.logger.error(
+				"Failed to start Weixin transport",
+				error instanceof Error ? error : new Error(String(error)),
+			);
+		}
 	}
 
 	/**
@@ -832,6 +881,17 @@ export class EdgeWorker extends EventEmitter {
 		this.registerGitHubEventTransport();
 		this.registerGitLabEventTransport();
 		this.registerSlackEventTransport();
+
+		// Register Weixin event transport if configured
+		this.logger.info(
+			`🔍 weixinEventTransport check: ${JSON.stringify(this.config.weixinEventTransport)}`,
+		);
+		if (this.config.weixinEventTransport) {
+			this.logger.info("📱 Registering Weixin event transport...");
+			this.registerWeixinEventTransport();
+		} else {
+			this.logger.info("📱 Weixin event transport NOT configured");
+		}
 
 		// 3. Create and register ConfigUpdater (both platforms)
 		this.configUpdater = new ConfigUpdater(
@@ -1173,6 +1233,124 @@ export class EdgeWorker extends EventEmitter {
 		this.logger.info(
 			`Slack event transport registered (${slackVerificationMode} mode)`,
 		);
+	}
+
+	/**
+	 * Register Weixin event transport for WeChat 1:1 direct messaging.
+	 *
+	 * Unlike Slack which uses webhooks, Weixin uses long-polling via weixin-bot-sdk.
+	 * The transport is started in start() after login succeeds.
+	 */
+	private registerWeixinEventTransport(): void {
+		const weixinConfig = this.config.weixinEventTransport!;
+
+		// Live provider reads from the repository map on demand
+		const chatRepositoryProvider = new LiveChatRepositoryProvider(
+			this.repositories,
+			() => this.config.linearWorkspaces || {},
+		);
+
+		const routingContext =
+			this.promptBuilder.generateRoutingContextForAllWorkspaces();
+
+		this.weixinChatAdapter = new WeixinChatAdapter(
+			chatRepositoryProvider,
+			this.logger,
+			{ repositoryRoutingContext: routingContext },
+		);
+
+		this.weixinSessionHandler = new ChatSessionHandler(
+			this.weixinChatAdapter,
+			{
+				cyrusHome: this.cyrusHome,
+				chatRepositoryProvider,
+				runnerConfigBuilder: this.runnerConfigBuilder,
+				createRunner: (config) => {
+					const runnerType = this.runnerSelectionService.getDefaultRunner();
+					return this.createRunnerForType(runnerType, {
+						...config,
+						model: this.getDefaultModelForRunner(runnerType),
+						fallbackModel: this.getDefaultFallbackModelForRunner(runnerType),
+					});
+				},
+				// Weixin doesn't support custom MCP configs yet
+				getPlatformMcpConfigOverrides: () => undefined,
+				resolveSkillsConfig: async ({ repository, repositoryPaths }) => {
+					const plugins = await this.skillsPluginResolver.resolve();
+					const skills = await this.skillsPluginResolver.discoverSkillNames(
+						plugins,
+						{
+							repositoryId: repository?.id,
+							repoPaths: repositoryPaths,
+						},
+					);
+					return { plugins, skills };
+				},
+				onWebhookStart: () => {
+					this.activeWebhookCount++;
+				},
+				onWebhookEnd: () => {
+					this.activeWebhookCount--;
+				},
+				onStateChange: () => this.savePersistedState(),
+				onClaudeError: (error) => this.handleClaudeError(error),
+			},
+			this.logger,
+		);
+
+		this.weixinEventTransport = new WeixinEventTransport(
+			{
+				credentialsPath: resolvePath(weixinConfig.credentialsPath),
+				timeoutMs: weixinConfig.timeoutMs ?? 120_000,
+				verbose: false,
+				onQrCode: (qrCodeDataUrl: string) => {
+					// The qrcode_img_content URL is missing bot_type=3, which is required
+					// for the WeChat liteapp to properly recognize and process the QR code.
+					// Append it if not already present.
+					const qrCodeUrl = qrCodeDataUrl.includes("bot_type=")
+						? qrCodeDataUrl
+						: `${qrCodeDataUrl}&bot_type=3`;
+					this.logger.info(`Weixin QR code: ${qrCodeUrl}`);
+				},
+				onStatus: (status: string) => {
+					this.logger.debug(`Weixin login status: ${status}`);
+				},
+			},
+			this.logger,
+		);
+
+		// Handle raw events for the WeixinChatAdapter
+		this.weixinEventTransport.on("rawEvent", (event: WeixinParsedMessage) => {
+			this.weixinSessionHandler!.handleEvent(event).catch((error) => {
+				this.logger.error(
+					"Failed to handle Weixin message",
+					error instanceof Error ? error : new Error(String(error)),
+				);
+			});
+		});
+
+		this.weixinEventTransport.on("message", (message: InternalMessage) => {
+			// Also handle via handleMessage for unified processing
+			this.handleMessage(message);
+		});
+
+		this.weixinEventTransport.on("error", (error: Error) => {
+			this.handleError(error);
+		});
+
+		this.weixinEventTransport.on("sessionExpired", () => {
+			this.logger.warn("Weixin session expired - manual re-login required");
+		});
+
+		this.weixinEventTransport.on("credentialsLoaded", (creds) => {
+			this.logger.info(`Weixin credentials loaded: botId=${creds.botId}`);
+		});
+
+		this.weixinEventTransport.on("stop", () => {
+			this.logger.info("Weixin transport stopped");
+		});
+
+		this.logger.info("Weixin event transport registered");
 	}
 
 	/**
@@ -2620,6 +2798,12 @@ ${taskSection}`;
 
 		// Clear event transport (no explicit cleanup needed, routes are removed when server stops)
 		this.linearEventTransport = null;
+		// Stop Weixin event transport
+		if (this.weixinEventTransport) {
+			this.weixinEventTransport.stop();
+			this.weixinEventTransport = null;
+		}
+		this.weixinChatAdapter = null;
 		this.configUpdater = null;
 		this.mcpConfigService.clearAllContexts();
 		this.cyrusToolsMcpSessions.removeAllListeners();

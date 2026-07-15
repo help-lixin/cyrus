@@ -200,6 +200,8 @@ export class ConfigManager extends EventEmitter {
 			// Merge with current EdgeWorker config structure
 			const newConfig: EdgeWorkerConfig = {
 				...this.config,
+				weixinEventTransport:
+					parsedConfig.weixinEventTransport ?? this.config.weixinEventTransport,
 				repositories: parsedConfig.repositories || [],
 				ngrokAuthToken:
 					parsedConfig.ngrokAuthToken || this.config.ngrokAuthToken,
@@ -360,6 +362,7 @@ export class ConfigManager extends EventEmitter {
 			"linearWorkspaces",
 			"userAccessControl",
 			"sandbox",
+			"weixinEventTransport",
 		];
 
 		for (const key of globalKeys) {

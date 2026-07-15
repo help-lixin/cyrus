@@ -606,6 +606,24 @@
 		"slackThreadFollowing": {
 			"type": "boolean"
 		},
+		"weixinEventTransport": {
+			"type": "object",
+			"properties": {
+				"credentialsPath": {
+					"type": "string"
+				},
+				"qrCodeLogging": {
+					"default": true,
+					"type": "boolean"
+				},
+				"timeoutMs": {
+					"default": 120000,
+					"type": "number"
+				}
+			},
+			"required": ["credentialsPath", "qrCodeLogging", "timeoutMs"],
+			"additionalProperties": false
+		},
 		"prReviewTrigger": {
 			"type": "boolean"
 		},

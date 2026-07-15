@@ -324,3 +324,37 @@ export interface SlackPlatformRef {
 		};
 	};
 }
+
+// ============================================================================
+// WEIXIN PLATFORM REFERENCES
+// ============================================================================
+
+/**
+ * Weixin platform reference types.
+ * Weixin is 1:1 chat only, so "channel" is the user's ID.
+ */
+export interface WeixinPlatformRef {
+	/** Channel data (user ID since 1:1 only) */
+	channel: {
+		/** User ID */
+		id: string;
+	};
+
+	/** Thread data (timestamp as thread ID) */
+	thread: {
+		/** Thread timestamp */
+		ts: string;
+	};
+
+	/** Message data */
+	message: {
+		/** Message ID */
+		messageId: string;
+		/** Message text */
+		text: string;
+		/** Message author */
+		user: {
+			id: string;
+		};
+	};
+}

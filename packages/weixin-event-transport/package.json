@@ -1,0 +1,30 @@
+{
+	"name": "cyrus-weixin-event-transport",
+	"version": "0.1.0",
+	"description": "WeChat/Weixin event transport using weixin-bot-sdk long-polling",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsc --watch",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest",
+		"test:run": "vitest run"
+	},
+	"dependencies": {
+		"cyrus-core": "workspace:*",
+		"weixin-bot-sdk": "^1.1.0"
+	},
+	"devDependencies": {
+		"@types/node": "^20.0.0",
+		"typescript": "^5.3.3",
+		"vitest": "^4.1.0"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

@@ -37,6 +37,11 @@ export class ConfigService {
 				const raw = JSON.parse(content);
 				// Migrate legacy per-repo tokens to workspace-keyed format
 				config = migrateEdgeConfig(raw) as EdgeConfig;
+				console.log(
+					"[ConfigService] after migrate, config.weixinEventTransport:",
+					config.weixinEventTransport,
+				);
+				console.log("[ConfigService] raw keys:", Object.keys(raw));
 			} catch (e) {
 				this.logger.error(
 					`Failed to load edge config: ${(e as Error).message}`,

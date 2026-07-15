@@ -21,6 +21,7 @@ export type {
 	GitLabPlatformRef,
 	LinearPlatformRef,
 	SlackPlatformRef,
+	WeixinPlatformRef,
 } from "./platform-refs.js";
 
 // Type guards
@@ -74,4 +75,7 @@ export type {
 	StopSignalMessage,
 	UnassignMessage,
 	UserPromptMessage,
+	// Weixin platform data types
+	WeixinSessionStartPlatformData,
+	WeixinUserPromptPlatformData,
 } from "./types.js";

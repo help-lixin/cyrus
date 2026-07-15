@@ -220,6 +220,9 @@ export type {
 	TranslationResult,
 	UnassignMessage,
 	UserPromptMessage,
+	WeixinPlatformRef,
+	WeixinSessionStartPlatformData,
+	WeixinUserPromptPlatformData,
 } from "./messages/index.js";
 export {
 	hasGitHubSessionStartPlatformData,

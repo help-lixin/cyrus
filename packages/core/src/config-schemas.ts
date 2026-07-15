@@ -468,6 +468,22 @@ export const EdgeConfigSchema = z.object({
 	slackThreadFollowing: z.boolean().optional(),
 
 	/**
+	 * WeChat/Weixin event transport configuration.
+	 * When set, Cyrus connects to WeChat via weixin-bot-sdk long-polling
+	 * and processes 1:1 direct messages.
+	 */
+	weixinEventTransport: z
+		.object({
+			/** Path to credentials file for Weixin bot login */
+			credentialsPath: z.string(),
+			/** Enable QR code logging to console during login */
+			qrCodeLogging: z.boolean().optional().default(true),
+			/** Login timeout in milliseconds */
+			timeoutMs: z.number().optional().default(120000),
+		})
+		.optional(),
+
+	/**
 	 * Whether to trigger agent sessions when a pull request review requests changes.
 	 * When disabled, a `pull_request_review` event produces no acknowledgement comment
 	 * and no agent session. Defaults to true if not specified.
