@@ -158,9 +158,9 @@ ${this.repositoryRoutingContext ? `\n\n${this.repositoryRoutingContext}` : ""}
 
 			// Send the reply via the message service
 			await this.messageService.reply(this.botRef, event, summary);
-			this.logger.info(
-				`Weixin reply sent to user ${event.from}: "${summary.slice(0, 50)}..."`,
-			);
+			// this.logger.info(
+			// 	`Weixin reply sent to user ${event.from}: "${summary.slice(0, 50)}..."`,
+			// );
 		} catch (error) {
 			this.logger.error(
 				"Failed to post Weixin reply",

@@ -247,6 +247,7 @@ export class WorkerService {
 			userAccessControl: edgeConfig.userAccessControl,
 			sandbox: edgeConfig.sandbox,
 			weixinEventTransport: edgeConfig.weixinEventTransport,
+			larkEventTransport: edgeConfig.larkEventTransport,
 			handlers: {
 				createWorkspace: async (
 					issue: Issue,

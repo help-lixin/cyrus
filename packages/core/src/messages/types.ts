@@ -11,6 +11,7 @@
 import type {
 	GitHubPlatformRef,
 	GitLabPlatformRef,
+	LarkPlatformRef,
 	LinearPlatformRef,
 	SlackPlatformRef,
 	WeixinPlatformRef,
@@ -35,7 +36,13 @@ export type MessageAction =
 /**
  * Platform source identifier.
  */
-export type MessageSource = "linear" | "github" | "gitlab" | "slack" | "weixin";
+export type MessageSource =
+	| "linear"
+	| "github"
+	| "gitlab"
+	| "slack"
+	| "lark"
+	| "weixin";
 
 // ============================================================================
 // AUTHOR TYPES
@@ -170,6 +177,20 @@ export interface SlackSessionStartPlatformData {
 }
 
 /**
+ * Lark-specific platform data for session start.
+ */
+export interface LarkSessionStartPlatformData {
+	/** Channel where the mention occurred */
+	channel: LarkPlatformRef["channel"];
+	/** Thread information */
+	thread: LarkPlatformRef["thread"];
+	/** The message that triggered this session */
+	message: LarkPlatformRef["message"];
+	/** Lark API token for API access */
+	larkApiToken?: string;
+}
+
+/**
  * Weixin-specific platform data for session start.
  */
 export interface WeixinSessionStartPlatformData {
@@ -201,6 +222,7 @@ export interface SessionStartMessage extends InternalMessageBase {
 		| GitHubSessionStartPlatformData
 		| GitLabSessionStartPlatformData
 		| SlackSessionStartPlatformData
+		| LarkSessionStartPlatformData
 		| WeixinSessionStartPlatformData;
 }
 
@@ -264,6 +286,20 @@ export interface SlackUserPromptPlatformData {
 }
 
 /**
+ * Lark-specific platform data for user prompt.
+ */
+export interface LarkUserPromptPlatformData {
+	/** Channel where the message was sent */
+	channel: LarkPlatformRef["channel"];
+	/** Thread information */
+	thread: LarkPlatformRef["thread"];
+	/** The message containing the prompt */
+	message: LarkPlatformRef["message"];
+	/** Lark API token for API access */
+	larkApiToken?: string;
+}
+
+/**
  * Weixin-specific platform data for user prompt.
  */
 export interface WeixinUserPromptPlatformData {
@@ -289,6 +325,7 @@ export interface UserPromptMessage extends InternalMessageBase {
 		| GitHubUserPromptPlatformData
 		| GitLabUserPromptPlatformData
 		| SlackUserPromptPlatformData
+		| LarkUserPromptPlatformData
 		| WeixinUserPromptPlatformData;
 }
 

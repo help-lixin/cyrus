@@ -618,6 +618,28 @@
 			"required": ["credentialsPath", "qrCodeLogging", "timeoutMs"],
 			"additionalProperties": false
 		},
+		"larkEventTransport": {
+			"type": "object",
+			"properties": {
+				"appId": {
+					"type": "string"
+				},
+				"appSecret": {
+					"type": "string"
+				},
+				"verificationMode": {
+					"default": "ws",
+					"type": "string",
+					"enum": ["ws", "webhook"]
+				},
+				"autoReconnect": {
+					"default": true,
+					"type": "boolean"
+				}
+			},
+			"required": ["appId", "appSecret", "verificationMode", "autoReconnect"],
+			"additionalProperties": false
+		},
 		"prReviewTrigger": {
 			"type": "boolean"
 		},

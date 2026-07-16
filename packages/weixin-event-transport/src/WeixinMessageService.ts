@@ -47,8 +47,8 @@ export class WeixinMessageService {
 	): Promise<void> {
 		try {
 			const msgForReply = this.toReplyMessage(parsed);
-			// await bot.reply(msgForReply, "✅ 完成");
-			await bot.reply(msgForReply, "");
+			await bot.reply(msgForReply, "✅ 完成");
+			// await bot.reply(msgForReply, "");
 		} catch (error) {
 			console.error("Failed to send Weixin completion:", error);
 		}

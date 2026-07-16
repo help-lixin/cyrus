@@ -115,6 +115,13 @@ export function isSlackMessage(message: InternalMessage): boolean {
 	return message.source === "slack";
 }
 
+/**
+ * Type guard to check if message is from Lark.
+ */
+export function isLarkMessage(message: InternalMessage): boolean {
+	return message.source === "lark";
+}
+
 // ============================================================================
 // PLATFORM DATA TYPE GUARDS
 // ============================================================================
@@ -205,4 +212,26 @@ export function hasSlackUserPromptPlatformData(
 	platformData: SlackUserPromptPlatformData;
 } {
 	return message.source === "slack";
+}
+
+/**
+ * Type guard for Lark platform data in SessionStartMessage.
+ */
+export function hasLarkSessionStartPlatformData(
+	message: SessionStartMessage,
+): message is SessionStartMessage & {
+	platformData: import("./types.js").LarkSessionStartPlatformData;
+} {
+	return message.source === "lark";
+}
+
+/**
+ * Type guard for Lark platform data in UserPromptMessage.
+ */
+export function hasLarkUserPromptPlatformData(
+	message: UserPromptMessage,
+): message is UserPromptMessage & {
+	platformData: import("./types.js").LarkUserPromptPlatformData;
+} {
+	return message.source === "lark";
 }

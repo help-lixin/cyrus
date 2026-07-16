@@ -1,0 +1,30 @@
+{
+	"name": "cyrus-lark-event-transport",
+	"version": "0.2.66",
+	"description": "Lark event transport for receiving and sending Lark/Feishu messages via WebSocket",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsc --watch",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest",
+		"test:run": "vitest run"
+	},
+	"dependencies": {
+		"@larksuiteoapi/node-sdk": "^1.71.1",
+		"cyrus-core": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^20.0.0",
+		"typescript": "^5.3.3",
+		"vitest": "^4.1.0"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

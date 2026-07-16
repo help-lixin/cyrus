@@ -484,6 +484,24 @@ export const EdgeConfigSchema = z.object({
 		.optional(),
 
 	/**
+	 * Lark/Feishu event transport configuration.
+	 * When set, Cyrus connects to Lark via WebSocket long connection
+	 * and processes messages in groups and 1:1 chats.
+	 */
+	larkEventTransport: z
+		.object({
+			/** Lark app ID */
+			appId: z.string(),
+			/** Lark app secret */
+			appSecret: z.string(),
+			/** Verification mode: 'ws' (WebSocket) or 'webhook' (HTTP). Defaults to 'ws'. */
+			verificationMode: z.enum(["ws", "webhook"]).optional().default("ws"),
+			/** Whether to enable auto-reconnect for WebSocket. Defaults to true. */
+			autoReconnect: z.boolean().optional().default(true),
+		})
+		.optional(),
+
+	/**
 	 * Whether to trigger agent sessions when a pull request review requests changes.
 	 * When disabled, a `pull_request_review` event produces no acknowledgement comment
 	 * and no agent session. Defaults to true if not specified.

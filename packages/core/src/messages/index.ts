@@ -19,6 +19,7 @@ export type {
 export type {
 	GitHubPlatformRef,
 	GitLabPlatformRef,
+	LarkPlatformRef,
 	LinearPlatformRef,
 	SlackPlatformRef,
 	WeixinPlatformRef,
@@ -30,6 +31,8 @@ export {
 	hasGitHubUserPromptPlatformData,
 	hasGitLabSessionStartPlatformData,
 	hasGitLabUserPromptPlatformData,
+	hasLarkSessionStartPlatformData,
+	hasLarkUserPromptPlatformData,
 	hasLinearSessionStartPlatformData,
 	hasLinearUserPromptPlatformData,
 	hasSlackSessionStartPlatformData,
@@ -38,6 +41,7 @@ export {
 	isGitHubMessage,
 	isGitLabMessage,
 	isIssueStateChangeMessage,
+	isLarkMessage,
 	isLinearMessage,
 	isSessionStartMessage,
 	isSlackMessage,
@@ -58,6 +62,9 @@ export type {
 	InternalMessage,
 	InternalMessageBase,
 	IssueStateChangeMessage,
+	// Lark platform data types
+	LarkSessionStartPlatformData,
+	LarkUserPromptPlatformData,
 	LinearContentUpdatePlatformData,
 	LinearIssueStateChangePlatformData,
 	// Platform-specific data types

@@ -56,6 +56,9 @@ importers:
       cyrus-edge-worker:
         specifier: workspace:*
         version: link:../../packages/edge-worker
+      cyrus-lark-event-transport:
+        specifier: workspace:*
+        version: link:../../packages/lark-event-transport
       cyrus-slack-event-transport:
         specifier: workspace:*
         version: link:../../packages/slack-event-transport
@@ -289,6 +292,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.205
         version: 0.3.205(@anthropic-ai/sdk@0.110.0(zod@4.3.6))(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(zod@4.3.6)
+      '@larksuiteoapi/node-sdk':
+        specifier: ^1.71.1
+        version: 1.71.1
       '@linear/sdk':
         specifier: ^64.0.0
         version: 64.0.0(encoding@0.1.13)
@@ -325,6 +331,9 @@ importers:
       cyrus-gitlab-event-transport:
         specifier: workspace:*
         version: link:../gitlab-event-transport
+      cyrus-lark-event-transport:
+        specifier: workspace:*
+        version: link:../lark-event-transport
       cyrus-linear-event-transport:
         specifier: workspace:*
         version: link:../linear-event-transport
@@ -337,6 +346,9 @@ importers:
       cyrus-slack-event-transport:
         specifier: workspace:*
         version: link:../slack-event-transport
+      cyrus-weixin-event-transport:
+        specifier: workspace:*
+        version: link:../weixin-event-transport
       fastify:
         specifier: ^5.8.5
         version: 5.8.5
@@ -352,6 +364,9 @@ importers:
       node-forge:
         specifier: ^1.4.0
         version: 1.4.0
+      weixin-bot-sdk:
+        specifier: ^1.1.0
+        version: 1.1.0
       zod:
         specifier: 4.3.6
         version: 4.3.6
@@ -456,6 +471,25 @@ importers:
         specifier: ^4.1.0
         version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@20.19.39)(@vitest/coverage-v8@4.1.8)(@vitest/ui@4.1.8)(vite@8.0.16(@types/node@20.19.39)(esbuild@0.28.1)(tsx@4.23.0)(yaml@2.8.3))
 
+  packages/lark-event-transport:
+    dependencies:
+      '@larksuiteoapi/node-sdk':
+        specifier: ^1.71.1
+        version: 1.71.1
+      cyrus-core:
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@20.19.39)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(vite@8.0.16(@types/node@20.19.39)(esbuild@0.28.1)(tsx@4.23.0)(yaml@2.8.3))
+
   packages/linear-event-transport:
     dependencies:
       '@linear/sdk':
@@ -550,14 +584,14 @@ importers:
         specifier: ^4.1.0
         version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@20.19.39)(@vitest/coverage-v8@4.1.8)(@vitest/ui@4.1.8)(vite@8.0.16(@types/node@20.19.39)(esbuild@0.28.1)(tsx@4.23.0)(yaml@2.8.3))
 
-  packages/weixin-slack-event-transport:
+  packages/weixin-event-transport:
     dependencies:
       cyrus-core:
         specifier: workspace:*
         version: link:../core
       weixin-bot-sdk:
-        specifier: file:/Users/lixin/GitRepository/weixin-bot-sdk
-        version: file:../weixin-bot-sdk
+        specifier: ^1.1.0
+        version: 1.1.0
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -1096,6 +1130,9 @@ packages:
 
   '@kwsites/promise-deferred@1.1.1':
     resolution: {integrity: sha512-GaHYm+c0O9MjZRu0ongGBRbinu8gVAMd2UZjji6jVmqKtZluZnptXGWhz1E8j8D2HJ3f/yMxKAUC0b+57wncIw==}
+
+  '@larksuiteoapi/node-sdk@1.71.1':
+    resolution: {integrity: sha512-Z4cZmgWvwiE7tCHqGm+t7DKvbpNRRTH2HqVwcYiOMAwbjIytXSoQqWytsOVu3p+d0fIvrtyIPZok5HOV/VNxxw==}
 
   '@linear/sdk@60.0.0':
     resolution: {integrity: sha512-6mllj354yC4iJ3euXvijisCQdTIlr77gpUl9Oit8qJYGXegtHZv+RwySdiLfNS6bXQy/Z5e0IYXXNg2sv9UrUQ==}
@@ -2947,6 +2984,15 @@ packages:
   lodash.camelcase@4.3.0:
     resolution: {integrity: sha512-TwuEnCnxbc3rAvhf/LbG7tJUDzhqXyFnv3dtzLOPgCG/hODL7WFnsbwktkD7yUV0RrreP/l1PALq/YSg6VvjlA==}
 
+  lodash.identity@3.0.0:
+    resolution: {integrity: sha512-AupTIzdLQxJS5wIYUQlgGyk2XRTfGXA+MCghDHqZk0pzUNYvd3EESS6dkChNauNYVIutcb0dfHw1ri9Q1yPV8Q==}
+
+  lodash.merge@4.6.2:
+    resolution: {integrity: sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ==}
+
+  lodash.pickby@4.6.0:
+    resolution: {integrity: sha512-AZV+GsS/6ckvPOVQPXSiFFacKvKB4kOQu6ynt9wz0F3LO4R9Ij4K1ddYsIytDpSgLz88JHd9P+oaLeej5/Sl7Q==}
+
   log-update@6.1.0:
     resolution: {integrity: sha512-9ie8ItPR6tjY5uYJh8K/Zrv/RMZ5VOlOWvtZdEHYSTFKZfIBPQa9tOAEeAWhd+AnIneLJ22w5fjOYtoutpWq5w==}
     engines: {node: '>=18'}
@@ -3919,8 +3965,8 @@ packages:
   webidl-conversions@3.0.1:
     resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
 
-  weixin-bot-sdk@file:../weixin-bot-sdk:
-    resolution: {directory: ../weixin-bot-sdk, type: directory}
+  weixin-bot-sdk@1.1.0:
+    resolution: {integrity: sha512-d5h8/cMwzcJEJ+ThAXmbOXHkz99DizcHkwCM53BJKHrp94o3QiAAooxYtZwkM5j9MHK3QS2+OoDkZ+TBdTuzkQ==}
     engines: {node: '>=18.0.0'}
 
   whatwg-url@5.0.0:
@@ -4541,6 +4587,21 @@ snapshots:
       - supports-color
 
   '@kwsites/promise-deferred@1.1.1': {}
+
+  '@larksuiteoapi/node-sdk@1.71.1':
+    dependencies:
+      axios: 1.18.0
+      lodash.identity: 3.0.0
+      lodash.merge: 4.6.2
+      lodash.pickby: 4.6.0
+      protobufjs: 7.6.5
+      qs: 6.15.2
+      ws: 8.21.0
+    transitivePeerDependencies:
+      - bufferutil
+      - debug
+      - supports-color
+      - utf-8-validate
 
   '@linear/sdk@60.0.0(encoding@0.1.13)':
     dependencies:
@@ -6562,6 +6623,12 @@ snapshots:
 
   lodash.camelcase@4.3.0: {}
 
+  lodash.identity@3.0.0: {}
+
+  lodash.merge@4.6.2: {}
+
+  lodash.pickby@4.6.0: {}
+
   log-update@6.1.0:
     dependencies:
       ansi-escapes: 7.3.0
@@ -7502,7 +7569,7 @@ snapshots:
 
   webidl-conversions@3.0.1: {}
 
-  weixin-bot-sdk@file:../weixin-bot-sdk: {}
+  weixin-bot-sdk@1.1.0: {}
 
   whatwg-url@5.0.0:
     dependencies:

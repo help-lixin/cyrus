@@ -124,6 +124,10 @@ import {
 	stripMention as stripGitLabMention,
 } from "cyrus-gitlab-event-transport";
 import {
+	LarkEventTransport,
+	type LarkWebhookEvent,
+} from "cyrus-lark-event-transport";
+import {
 	LinearEventTransport,
 	LinearIssueTrackerService,
 	type LinearOAuthConfig,
@@ -155,6 +159,7 @@ import { DefaultSkillsDeployer } from "./DefaultSkillsDeployer.js";
 import { EgressProxy } from "./EgressProxy.js";
 import { GitService } from "./GitService.js";
 import { GlobalSessionRegistry } from "./GlobalSessionRegistry.js";
+import { LarkChatAdapter } from "./LarkChatAdapter.js";
 import { McpConfigService } from "./McpConfigService.js";
 import { PromptBuilder } from "./PromptBuilder.js";
 import type {
@@ -224,6 +229,10 @@ export class EdgeWorker extends EventEmitter {
 	private weixinEventTransport: WeixinEventTransport | null = null;
 	private weixinChatAdapter: WeixinChatAdapter | null = null;
 	private weixinSessionHandler: ChatSessionHandler<WeixinParsedMessage> | null =
+		null;
+	private larkEventTransport: LarkEventTransport | null = null;
+	private larkChatAdapter: LarkChatAdapter | null = null;
+	private larkSessionHandler: ChatSessionHandler<LarkWebhookEvent> | null =
 		null;
 	private chatSessionHandler: ChatSessionHandler<SlackWebhookEvent> | null =
 		null;
@@ -726,6 +735,16 @@ export class EdgeWorker extends EventEmitter {
 				);
 			});
 		}
+
+		// Start Lark transport after server is ready
+		if (this.larkEventTransport) {
+			this.startLarkTransport().catch((error) => {
+				this.logger.error(
+					"Failed to start Lark transport",
+					error instanceof Error ? error : new Error(String(error)),
+				);
+			});
+		}
 	}
 
 	/**
@@ -753,6 +772,26 @@ export class EdgeWorker extends EventEmitter {
 		} catch (error) {
 			this.logger.error(
 				"Failed to start Weixin transport",
+				error instanceof Error ? error : new Error(String(error)),
+			);
+		}
+	}
+
+	/**
+	 * Start the Lark transport (WebSocket connection).
+	 * This is called after the server is ready.
+	 */
+	private async startLarkTransport(): Promise<void> {
+		if (!this.larkEventTransport) {
+			return;
+		}
+
+		try {
+			await this.larkEventTransport.register();
+			this.logger.info("Lark event transport started");
+		} catch (error) {
+			this.logger.error(
+				"Failed to start Lark transport",
 				error instanceof Error ? error : new Error(String(error)),
 			);
 		}
@@ -891,6 +930,17 @@ export class EdgeWorker extends EventEmitter {
 			this.registerWeixinEventTransport();
 		} else {
 			this.logger.info("📱 Weixin event transport NOT configured");
+		}
+
+		// Register Lark event transport if configured
+		this.logger.info(
+			`🔍 larkEventTransport check: ${JSON.stringify(this.config.larkEventTransport)}`,
+		);
+		if (this.config.larkEventTransport) {
+			this.logger.info("📱 Registering Lark event transport...");
+			this.registerLarkEventTransport();
+		} else {
+			this.logger.info("📱 Lark event transport NOT configured");
 		}
 
 		// 3. Create and register ConfigUpdater (both platforms)
@@ -1351,6 +1401,115 @@ export class EdgeWorker extends EventEmitter {
 		});
 
 		this.logger.info("Weixin event transport registered");
+	}
+
+	/**
+	 * Register Lark event transport for Lark/Feishu messaging.
+	 *
+	 * Lark uses WebSocket long connection via @larksuiteoapi/node-sdk.
+	 * The transport is started in startLarkTransport() after the server is ready.
+	 */
+	private registerLarkEventTransport(): void {
+		const larkConfig = this.config.larkEventTransport!;
+
+		// Live provider reads from the repository map on demand
+		const chatRepositoryProvider = new LiveChatRepositoryProvider(
+			this.repositories,
+			() => this.config.linearWorkspaces || {},
+		);
+
+		const routingContext =
+			this.promptBuilder.generateRoutingContextForAllWorkspaces();
+
+		this.larkChatAdapter = new LarkChatAdapter(
+			chatRepositoryProvider,
+			this.logger,
+			{
+				repositoryRoutingContext: routingContext,
+				appId: larkConfig.appId,
+				appSecret: larkConfig.appSecret,
+			},
+		);
+
+		this.larkSessionHandler = new ChatSessionHandler(
+			this.larkChatAdapter,
+			{
+				cyrusHome: this.cyrusHome,
+				chatRepositoryProvider,
+				runnerConfigBuilder: this.runnerConfigBuilder,
+				createRunner: (config) => {
+					const runnerType = this.runnerSelectionService.getDefaultRunner();
+					return this.createRunnerForType(runnerType, {
+						...config,
+						model: this.getDefaultModelForRunner(runnerType),
+						fallbackModel: this.getDefaultFallbackModelForRunner(runnerType),
+					});
+				},
+				// Lark doesn't support custom MCP configs yet
+				getPlatformMcpConfigOverrides: () => undefined,
+				resolveSkillsConfig: async ({ repository, repositoryPaths }) => {
+					const plugins = await this.skillsPluginResolver.resolve();
+					const skills = await this.skillsPluginResolver.discoverSkillNames(
+						plugins,
+						{
+							repositoryId: repository?.id,
+							repoPaths: repositoryPaths,
+						},
+					);
+					return { plugins, skills };
+				},
+				onWebhookStart: () => {
+					this.activeWebhookCount++;
+				},
+				onWebhookEnd: () => {
+					this.activeWebhookCount--;
+				},
+				onStateChange: () => this.savePersistedState(),
+				onClaudeError: (error) => this.handleClaudeError(error),
+			},
+			this.logger,
+		);
+
+		this.larkEventTransport = new LarkEventTransport({
+			appId: larkConfig.appId,
+			appSecret: larkConfig.appSecret,
+			verificationMode: larkConfig.verificationMode ?? "ws",
+			autoReconnect: larkConfig.autoReconnect ?? true,
+			isThreadFollowingEnabled: () => true,
+		});
+
+		// Handle raw events for the LarkChatAdapter
+		this.larkEventTransport.on("event", (event: LarkWebhookEvent) => {
+			this.larkSessionHandler!.handleEvent(event).catch((error) => {
+				this.logger.error(
+					"Failed to handle Lark message",
+					error instanceof Error ? error : new Error(String(error)),
+				);
+			});
+		});
+
+		this.larkEventTransport.on("message", (message: InternalMessage) => {
+			// Also handle via handleMessage for unified processing
+			this.handleMessage(message);
+		});
+
+		this.larkEventTransport.on("error", (error: Error) => {
+			this.handleError(error);
+		});
+
+		this.larkEventTransport.on("connected", () => {
+			this.logger.info("Lark WebSocket connected");
+		});
+
+		this.larkEventTransport.on("disconnected", () => {
+			this.logger.info("Lark WebSocket disconnected");
+		});
+
+		this.larkEventTransport.on("reconnecting", () => {
+			this.logger.info("Lark WebSocket reconnecting");
+		});
+
+		this.logger.info("Lark event transport registered");
 	}
 
 	/**
@@ -2804,6 +2963,12 @@ ${taskSection}`;
 			this.weixinEventTransport = null;
 		}
 		this.weixinChatAdapter = null;
+		// Stop Lark event transport
+		if (this.larkEventTransport) {
+			this.larkEventTransport.close();
+			this.larkEventTransport = null;
+		}
+		this.larkChatAdapter = null;
 		this.configUpdater = null;
 		this.mcpConfigService.clearAllContexts();
 		this.cyrusToolsMcpSessions.removeAllListeners();

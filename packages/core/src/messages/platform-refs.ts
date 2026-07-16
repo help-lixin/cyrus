@@ -326,6 +326,51 @@ export interface SlackPlatformRef {
 }
 
 // ============================================================================
+// LARK PLATFORM REFERENCES
+// ============================================================================
+
+/**
+ * Lark platform reference types.
+ * Lark supports both group chats and 1:1 (p2p) messages.
+ */
+export interface LarkPlatformRef {
+	/** Channel data */
+	channel: {
+		/** Channel/Chat ID */
+		id: string;
+		/** Channel name (for group chats) */
+		name?: string;
+		/** Chat type: 'group' for group chat, 'p2p' for 1:1 */
+		type: "group" | "p2p";
+	};
+
+	/** Thread data */
+	thread: {
+		/** Thread/Message ID */
+		messageId: string;
+		/** Parent message ID (for replies) */
+		parentId?: string;
+		/** Root message ID (for threaded replies) */
+		rootId?: string;
+	};
+
+	/** Message data */
+	message: {
+		/** Message ID */
+		messageId: string;
+		/** Message text content */
+		text: string;
+		/** Whether the bot was mentioned */
+		mentionedBot?: boolean;
+		/** Message author */
+		user: {
+			id: string;
+			name?: string;
+		};
+	};
+}
+
+// ============================================================================
 // WEIXIN PLATFORM REFERENCES
 // ============================================================================
 
