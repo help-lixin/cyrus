@@ -140,6 +140,10 @@ import {
 	type ResolvedSession,
 } from "cyrus-mcp-tools";
 import {
+	QQEventTransport,
+	type QQWebhookEvent,
+} from "cyrus-qq-event-transport";
+import {
 	SlackEventTransport,
 	type SlackWebhookEvent,
 } from "cyrus-slack-event-transport";
@@ -169,6 +173,7 @@ import type {
 	PromptComponent,
 	PromptType,
 } from "./prompt-assembly/types.js";
+import { QQChatAdapter } from "./QQChatAdapter.js";
 import {
 	RepositoryRouter,
 	type RepositoryRouterDeps,
@@ -234,6 +239,9 @@ export class EdgeWorker extends EventEmitter {
 	private larkChatAdapter: LarkChatAdapter | null = null;
 	private larkSessionHandler: ChatSessionHandler<LarkWebhookEvent> | null =
 		null;
+	private qqEventTransport: QQEventTransport | null = null;
+	private qqChatAdapter: QQChatAdapter | null = null;
+	private qqSessionHandler: ChatSessionHandler<QQWebhookEvent> | null = null;
 	private chatSessionHandler: ChatSessionHandler<SlackWebhookEvent> | null =
 		null;
 	private gitHubCommentService: GitHubCommentService; // Service for posting comments back to GitHub PRs
@@ -636,6 +644,9 @@ export class EdgeWorker extends EventEmitter {
 	 * Start the edge worker
 	 */
 	async start(): Promise<void> {
+		this.logger.info(
+			`[EdgeWorker] start() BEGIN: qqEventTransport=${this.qqEventTransport ? "defined" : "NULL"}, qqChatAdapter=${this.qqChatAdapter ? "defined" : "NULL"}`,
+		);
 		// Deploy default skills to cyrusHome if not already present (one-time setup)
 		await this.defaultSkillsDeployer.ensureDeployed();
 
@@ -741,6 +752,19 @@ export class EdgeWorker extends EventEmitter {
 			this.startLarkTransport().catch((error) => {
 				this.logger.error(
 					"Failed to start Lark transport",
+					error instanceof Error ? error : new Error(String(error)),
+				);
+			});
+		}
+
+		// Start QQ transport after server is ready
+		this.logger.info(
+			`[EdgeWorker] start(): qqEventTransport=${this.qqEventTransport ? "defined" : "NULL"}`,
+		);
+		if (this.qqEventTransport) {
+			this.startQqTransport().catch((error) => {
+				this.logger.error(
+					"Failed to start QQ transport",
 					error instanceof Error ? error : new Error(String(error)),
 				);
 			});
@@ -941,6 +965,17 @@ export class EdgeWorker extends EventEmitter {
 			this.registerLarkEventTransport();
 		} else {
 			this.logger.info("📱 Lark event transport NOT configured");
+		}
+
+		// Register QQ event transport if configured
+		this.logger.info(
+			`🔍 qqEventTransport check: ${JSON.stringify(this.config.qqEventTransport)}`,
+		);
+		if (this.config.qqEventTransport) {
+			this.logger.info("📱 Registering QQ event transport...");
+			this.registerQQEventTransport();
+		} else {
+			this.logger.info("📱 QQ event transport NOT configured");
 		}
 
 		// 3. Create and register ConfigUpdater (both platforms)
@@ -1510,6 +1545,143 @@ export class EdgeWorker extends EventEmitter {
 		});
 
 		this.logger.info("Lark event transport registered");
+	}
+
+	/**
+	 * Register QQ event transport for QQ messaging.
+	 *
+	 * QQ uses WebSocket long connection via @tencent-connect/qqbot-nodejs.
+	 * The transport is started asynchronously after registration (in startQqTransport).
+	 */
+	private registerQQEventTransport(): void {
+		const qqConfig = this.config.qqEventTransport!;
+
+		// Live provider reads from the repository map on demand
+		const chatRepositoryProvider = new LiveChatRepositoryProvider(
+			this.repositories,
+			() => this.config.linearWorkspaces || {},
+		);
+
+		const routingContext =
+			this.promptBuilder.generateRoutingContextForAllWorkspaces();
+
+		this.qqChatAdapter = new QQChatAdapter(
+			chatRepositoryProvider,
+			this.logger,
+			{
+				repositoryRoutingContext: routingContext,
+			},
+		);
+
+		this.qqSessionHandler = new ChatSessionHandler(
+			this.qqChatAdapter,
+			{
+				cyrusHome: this.cyrusHome,
+				chatRepositoryProvider,
+				runnerConfigBuilder: this.runnerConfigBuilder,
+				createRunner: (config) => {
+					const runnerType = this.runnerSelectionService.getDefaultRunner();
+					return this.createRunnerForType(runnerType, {
+						...config,
+						model: this.getDefaultModelForRunner(runnerType),
+						fallbackModel: this.getDefaultFallbackModelForRunner(runnerType),
+					});
+				},
+				// QQ doesn't support custom MCP configs yet
+				getPlatformMcpConfigOverrides: () => undefined,
+				resolveSkillsConfig: async ({ repository, repositoryPaths }) => {
+					const plugins = await this.skillsPluginResolver.resolve();
+					const skills = await this.skillsPluginResolver.discoverSkillNames(
+						plugins,
+						{
+							repositoryId: repository?.id,
+							repoPaths: repositoryPaths,
+						},
+					);
+					return { plugins, skills };
+				},
+				onWebhookStart: () => {
+					this.activeWebhookCount++;
+				},
+				onWebhookEnd: () => {
+					this.activeWebhookCount--;
+				},
+				onStateChange: () => this.savePersistedState(),
+				onClaudeError: (error) => this.handleClaudeError(error),
+			},
+			this.logger,
+		);
+
+		this.qqEventTransport = new QQEventTransport({
+			appId: qqConfig.appId,
+			appSecret: qqConfig.appSecret,
+			markdownSupport: qqConfig.markdownSupport ?? false,
+			isThreadFollowingEnabled: () => true,
+		});
+
+		// Handle raw events for the QQChatAdapter
+		this.qqEventTransport.on("event", (event: QQWebhookEvent) => {
+			this.qqSessionHandler!.handleEvent(event).catch((error) => {
+				this.logger.error(
+					"Failed to handle QQ message",
+					error instanceof Error ? error : new Error(String(error)),
+				);
+			});
+		});
+
+		this.qqEventTransport.on("message", (message: InternalMessage) => {
+			// Also handle via handleMessage for unified processing
+			this.handleMessage(message);
+		});
+
+		this.qqEventTransport.on("error", (error: Error) => {
+			this.handleError(error);
+		});
+
+		this.logger.info("QQ event transport registered");
+	}
+
+	/**
+	 * Start the QQ transport WebSocket connection.
+	 * Called after the server is ready so startup is not blocked.
+	 */
+	private async startQqTransport(): Promise<void> {
+		this.logger.info(
+			`[EdgeWorker] startQqTransport() ENTRY: qqEventTransport=${this.qqEventTransport ? "defined" : "NULL"}, qqChatAdapter=${this.qqChatAdapter ? "defined" : "NULL"}`,
+		);
+		if (!this.qqEventTransport) {
+			this.logger.warn(
+				"[EdgeWorker] startQqTransport: early return - qqEventTransport is NULL",
+			);
+			return;
+		}
+
+		try {
+			// Start the QQ WebSocket connection
+			await this.qqEventTransport.start();
+
+			// Pass the bot instance to the adapter for sending replies
+			this.logger.info("[EdgeWorker] startQqTransport: AFTER await start()");
+			if (this.qqChatAdapter) {
+				const bot = this.qqEventTransport.getBot();
+				this.logger.info(
+					`[EdgeWorker] startQqTransport: qqEventTransport.getBot()=${bot ? "non-null" : "NULL"}`,
+				);
+				this.qqChatAdapter.setBot(bot);
+				this.logger.info("[EdgeWorker] startQqTransport: AFTER setBot()");
+			}
+
+			this.logger.info(
+				"🔍 QQEventTransport check: WebSocket connected to QQ Open Platform",
+			);
+			this.logger.info("QQ event transport started");
+		} catch (error) {
+			this.logger.error(
+				"Failed to start QQ transport",
+				error instanceof Error ? error : new Error(String(error)),
+			);
+			throw error;
+		}
 	}
 
 	/**

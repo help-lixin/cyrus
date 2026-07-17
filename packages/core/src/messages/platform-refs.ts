@@ -403,3 +403,44 @@ export interface WeixinPlatformRef {
 		};
 	};
 }
+
+// ============================================================================
+// QQ PLATFORM REFERENCES
+// ============================================================================
+
+/**
+ * QQ platform reference types.
+ * QQ supports both C2C (private) and Group chats.
+ */
+export interface QQPlatformRef {
+	/** Channel data */
+	channel: {
+		/** Channel ID (user ID for C2C, group ID for Group) */
+		id: string;
+		/** Channel type: 'c2c' for private chat, 'group' for group chat */
+		type: "c2c" | "group";
+	};
+
+	/** Thread data */
+	thread: {
+		/** Message ID */
+		messageId: string;
+		/** Parent message ID (for replies) */
+		parentId?: string;
+	};
+
+	/** Message data */
+	message: {
+		/** Message ID */
+		messageId: string;
+		/** Message text content */
+		text: string;
+		/** Whether the bot was mentioned */
+		mentionedBot?: boolean;
+		/** Message author */
+		user: {
+			id: string;
+			name?: string;
+		};
+	};
+}

@@ -235,3 +235,32 @@ export function hasLarkUserPromptPlatformData(
 } {
 	return message.source === "lark";
 }
+
+/**
+ * Type guard to check if message is from QQ.
+ */
+export function isQQMessage(message: InternalMessage): boolean {
+	return message.source === "qq";
+}
+
+/**
+ * Type guard for QQ platform data in SessionStartMessage.
+ */
+export function hasQQSessionStartPlatformData(
+	message: SessionStartMessage,
+): message is SessionStartMessage & {
+	platformData: import("./types.js").QQSessionStartPlatformData;
+} {
+	return message.source === "qq";
+}
+
+/**
+ * Type guard for QQ platform data in UserPromptMessage.
+ */
+export function hasQQUserPromptPlatformData(
+	message: UserPromptMessage,
+): message is UserPromptMessage & {
+	platformData: import("./types.js").QQUserPromptPlatformData;
+} {
+	return message.source === "qq";
+}

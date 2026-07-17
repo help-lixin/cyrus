@@ -646,6 +646,23 @@
 			"required": ["appId", "appSecret", "verificationMode", "autoReconnect"],
 			"additionalProperties": false
 		},
+		"qqEventTransport": {
+			"type": "object",
+			"properties": {
+				"appId": {
+					"type": "string"
+				},
+				"appSecret": {
+					"type": "string"
+				},
+				"markdownSupport": {
+					"default": false,
+					"type": "boolean"
+				}
+			},
+			"required": ["appId", "appSecret", "markdownSupport"],
+			"additionalProperties": false
+		},
 		"prReviewTrigger": {
 			"type": "boolean"
 		},

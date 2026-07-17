@@ -21,6 +21,7 @@ export type {
 	GitLabPlatformRef,
 	LarkPlatformRef,
 	LinearPlatformRef,
+	QQPlatformRef,
 	SlackPlatformRef,
 	WeixinPlatformRef,
 } from "./platform-refs.js";
@@ -35,6 +36,8 @@ export {
 	hasLarkUserPromptPlatformData,
 	hasLinearSessionStartPlatformData,
 	hasLinearUserPromptPlatformData,
+	hasQQSessionStartPlatformData,
+	hasQQUserPromptPlatformData,
 	hasSlackSessionStartPlatformData,
 	hasSlackUserPromptPlatformData,
 	isContentUpdateMessage,
@@ -43,6 +46,7 @@ export {
 	isIssueStateChangeMessage,
 	isLarkMessage,
 	isLinearMessage,
+	isQQMessage,
 	isSessionStartMessage,
 	isSlackMessage,
 	isStopSignalMessage,
@@ -75,6 +79,9 @@ export type {
 	MessageAction,
 	MessageAuthor,
 	MessageSource,
+	// QQ platform data types
+	QQSessionStartPlatformData,
+	QQUserPromptPlatformData,
 	SessionStartMessage,
 	// Slack platform data types
 	SlackSessionStartPlatformData,

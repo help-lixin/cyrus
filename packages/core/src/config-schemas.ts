@@ -502,6 +502,22 @@ export const EdgeConfigSchema = z.object({
 		.optional(),
 
 	/**
+	 * QQ event transport configuration.
+	 * When set, Cyrus connects to QQ Open Platform via WebSocket
+	 * and processes messages in groups and 1:1 chats.
+	 */
+	qqEventTransport: z
+		.object({
+			/** QQ Open Platform App ID */
+			appId: z.string(),
+			/** QQ Open Platform App Secret */
+			appSecret: z.string(),
+			/** Whether the bot supports markdown messages. Defaults to false. */
+			markdownSupport: z.boolean().optional().default(false),
+		})
+		.optional(),
+
+	/**
 	 * Whether to trigger agent sessions when a pull request review requests changes.
 	 * When disabled, a `pull_request_review` event produces no acknowledgement comment
 	 * and no agent session. Defaults to true if not specified.

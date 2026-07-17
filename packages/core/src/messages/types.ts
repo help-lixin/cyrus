@@ -13,6 +13,7 @@ import type {
 	GitLabPlatformRef,
 	LarkPlatformRef,
 	LinearPlatformRef,
+	QQPlatformRef,
 	SlackPlatformRef,
 	WeixinPlatformRef,
 } from "./platform-refs.js";
@@ -42,7 +43,8 @@ export type MessageSource =
 	| "gitlab"
 	| "slack"
 	| "lark"
-	| "weixin";
+	| "weixin"
+	| "qq";
 
 // ============================================================================
 // AUTHOR TYPES
@@ -203,6 +205,18 @@ export interface WeixinSessionStartPlatformData {
 }
 
 /**
+ * QQ-specific platform data for session start.
+ */
+export interface QQSessionStartPlatformData {
+	/** Channel where the mention occurred */
+	channel: QQPlatformRef["channel"];
+	/** Thread information */
+	thread: QQPlatformRef["thread"];
+	/** The message that triggered this session */
+	message: QQPlatformRef["message"];
+}
+
+/**
  * Session start message - initiates a new agent session.
  * Triggered by: Linear delegation, PR mention, thread start, etc.
  */
@@ -223,7 +237,8 @@ export interface SessionStartMessage extends InternalMessageBase {
 		| GitLabSessionStartPlatformData
 		| SlackSessionStartPlatformData
 		| LarkSessionStartPlatformData
-		| WeixinSessionStartPlatformData;
+		| WeixinSessionStartPlatformData
+		| QQSessionStartPlatformData;
 }
 
 // ============================================================================
@@ -312,6 +327,18 @@ export interface WeixinUserPromptPlatformData {
 }
 
 /**
+ * QQ-specific platform data for user prompt.
+ */
+export interface QQUserPromptPlatformData {
+	/** Channel where the message was sent */
+	channel: QQPlatformRef["channel"];
+	/** Thread information */
+	thread: QQPlatformRef["thread"];
+	/** The message containing the prompt */
+	message: QQPlatformRef["message"];
+}
+
+/**
  * User prompt message - a user message during an active session.
  * Triggered by: Mid-session comments, follow-up questions, etc.
  */
@@ -326,7 +353,8 @@ export interface UserPromptMessage extends InternalMessageBase {
 		| GitLabUserPromptPlatformData
 		| SlackUserPromptPlatformData
 		| LarkUserPromptPlatformData
-		| WeixinUserPromptPlatformData;
+		| WeixinUserPromptPlatformData
+		| QQUserPromptPlatformData;
 }
 
 // ============================================================================
