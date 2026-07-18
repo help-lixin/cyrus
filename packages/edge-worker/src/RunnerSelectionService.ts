@@ -64,6 +64,9 @@ export class RunnerSelectionService {
 		if (runnerType === "cursor") {
 			return this.config.cursorDefaultModel || "composer-2";
 		}
+		if (runnerType === "opencode") {
+			return this.config.opencodeDefaultModel || "anthropic/claude-sonnet-4-6";
+		}
 		return this.config.codexDefaultModel || "gpt-5.5";
 	}
 
@@ -87,6 +90,11 @@ export class RunnerSelectionService {
 		}
 		if (runnerType === "cursor") {
 			return this.config.cursorDefaultFallbackModel || "composer-2";
+		}
+		if (runnerType === "opencode") {
+			return (
+				this.config.opencodeDefaultFallbackModel || "anthropic/claude-haiku-4-5"
+			);
 		}
 		return "gpt-5";
 	}
@@ -146,12 +154,14 @@ export class RunnerSelectionService {
 			gemini: this.getDefaultModelForRunner("gemini"),
 			codex: this.getDefaultModelForRunner("codex"),
 			cursor: this.getDefaultModelForRunner("cursor"),
+			opencode: this.getDefaultModelForRunner("opencode"),
 		};
 		const defaultFallbackByRunner: Record<RunnerType, string> = {
 			claude: this.getDefaultFallbackModelForRunner("claude"),
 			gemini: this.getDefaultFallbackModelForRunner("gemini"),
 			codex: this.getDefaultFallbackModelForRunner("codex"),
 			cursor: this.getDefaultFallbackModelForRunner("cursor"),
+			opencode: this.getDefaultFallbackModelForRunner("opencode"),
 		};
 
 		const isCodexModel = (model: string): boolean =>
@@ -233,6 +243,9 @@ export class RunnerSelectionService {
 			if (lowercaseLabels.includes("claude")) {
 				return "claude";
 			}
+			if (lowercaseLabels.includes("opencode")) {
+				return "opencode";
+			}
 			return undefined;
 		};
 
@@ -284,7 +297,9 @@ export class RunnerSelectionService {
 						? "gemini"
 						: agentFromDescription === "claude"
 							? "claude"
-							: undefined;
+							: agentFromDescription === "opencode"
+								? "opencode"
+								: undefined;
 		const resolvedAgentFromLabels = resolveAgentFromLabel(normalizedLabels);
 
 		const modelFromDescription = descriptionModelTagRaw;

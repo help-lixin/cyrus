@@ -143,6 +143,7 @@ import {
 	type FailureModesHttpClient,
 	type ResolvedSession,
 } from "cyrus-mcp-tools";
+import { OpenCodeRunner } from "cyrus-opencode-runner";
 import {
 	QQEventTransport,
 	type QQWebhookEvent,
@@ -6015,13 +6016,11 @@ ${taskSection}`;
 	 * Instantiate the appropriate runner for the given type.
 	 */
 	private createRunnerForType(
-		runnerType: "claude" | "gemini" | "codex" | "cursor",
+		runnerType: "claude" | "gemini" | "codex" | "cursor" | "opencode",
 		config: AgentRunnerConfig,
 	): IAgentRunner {
 		switch (runnerType) {
 			case "claude": {
-				// Inject the hosted SessionStore at the last moment so it only
-				// attaches to Claude runners (the field is Claude-specific).
 				const claudeConfig = this.claudeSessionStore
 					? { ...config, sessionStore: this.claudeSessionStore }
 					: config;
@@ -6033,6 +6032,8 @@ ${taskSection}`;
 				return new CodexRunner(config);
 			case "cursor":
 				return new CursorRunner(config);
+			case "opencode":
+				return new OpenCodeRunner(config);
 			default:
 				throw new Error(`Unknown runner type: ${runnerType satisfies never}`);
 		}
@@ -6531,12 +6532,15 @@ ${taskSection}`;
 					? "codex"
 					: session.cursorSessionId
 						? "cursor"
-						: null;
+						: session.opencodeSessionId
+							? "opencode"
+							: (null as ResolvedSession["runnerType"]);
 		const runnerSessionId =
 			session.claudeSessionId ??
 			session.geminiSessionId ??
 			session.codexSessionId ??
 			session.cursorSessionId ??
+			session.opencodeSessionId ??
 			null;
 
 		const sessionSource = session.id.startsWith("github-")
@@ -7886,12 +7890,15 @@ ${input.userComment}
 		const hasGeminiSession = !isNewSession && Boolean(session.geminiSessionId);
 		const hasCodexSession = !isNewSession && Boolean(session.codexSessionId);
 		const hasCursorSession = !isNewSession && Boolean(session.cursorSessionId);
+		const hasOpencodeSession =
+			!isNewSession && Boolean(session.opencodeSessionId);
 		const needsNewSession =
 			isNewSession ||
 			(!hasClaudeSession &&
 				!hasGeminiSession &&
 				!hasCodexSession &&
-				!hasCursorSession);
+				!hasCursorSession &&
+				!hasOpencodeSession);
 
 		// Fetch system prompt based on labels
 
@@ -7934,7 +7941,9 @@ ${input.userComment}
 					? session.geminiSessionId
 					: session.codexSessionId
 						? session.codexSessionId
-						: session.cursorSessionId;
+						: session.cursorSessionId
+							? session.cursorSessionId
+							: session.opencodeSessionId;
 
 		console.log(
 			`[resumeAgentSession] needsNewSession=${needsNewSession}, resumeSessionId=${resumeSessionId ?? "none"}`,

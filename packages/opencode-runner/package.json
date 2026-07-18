@@ -1,0 +1,31 @@
+{
+	"name": "cyrus-opencode-runner",
+	"version": "0.2.66",
+	"description": "OpenCode Agent CLI process wrapper for Cyrus",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsc --watch",
+		"test": "node ../../node_modules/.pnpm/node_modules/vitest/vitest.mjs",
+		"test:run": "node ../../node_modules/.pnpm/node_modules/vitest/vitest.mjs run --passWithNoTests",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@opencode-ai/sdk": "^1.18.3",
+		"cyrus-core": "workspace:*",
+		"cyrus-simple-agent-runner": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^20.0.0",
+		"typescript": "^5.3.3",
+		"vitest": "^4.1.9"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

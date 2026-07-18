@@ -371,6 +371,9 @@ importers:
       cyrus-mcp-tools:
         specifier: workspace:*
         version: link:../mcp-tools
+      cyrus-opencode-runner:
+        specifier: workspace:*
+        version: link:../opencode-runner
       cyrus-qq-event-transport:
         specifier: workspace:*
         version: link:../qq-event-transport
@@ -579,6 +582,28 @@ importers:
       vitest:
         specifier: ^4.1.0
         version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@20.19.39)(@vitest/coverage-v8@4.1.8)(@vitest/ui@4.1.8)(vite@8.0.16(@types/node@20.19.39)(esbuild@0.28.1)(tsx@4.23.0)(yaml@2.8.3))
+
+  packages/opencode-runner:
+    dependencies:
+      '@opencode-ai/sdk':
+        specifier: ^1.18.3
+        version: 1.18.3
+      cyrus-core:
+        specifier: workspace:*
+        version: link:../core
+      cyrus-simple-agent-runner:
+        specifier: workspace:*
+        version: link:../simple-agent-runner
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@20.19.39)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(vite@8.0.16(@types/node@20.19.39)(esbuild@0.28.1)(tsx@4.23.0)(yaml@2.8.3))
 
   packages/qq-event-transport:
     dependencies:
@@ -1376,6 +1401,9 @@ packages:
     engines: {node: '>=16'}
     cpu: [x64]
     os: [win32]
+
+  '@opencode-ai/sdk@1.18.3':
+    resolution: {integrity: sha512-Mevo4e6kQwbvto9E+42KSIVMhp+JBu+SwQhC5AomAvrV6Xkio3U249T+xDILDCXhl5Z/Hi/DlAuVLzpGnuh0gg==}
 
   '@opentelemetry/api-logs@0.218.0':
     resolution: {integrity: sha512-fmEWp5kXlGEc3i/lR698Hz41DfGyN4Tbe4g7L1AxSc7fF8Xeh/FQ9Quqpa9dVA413Q1Ad43QOLzU4JoXgbFPWw==}
@@ -4854,6 +4882,10 @@ snapshots:
 
   '@openai/codex@0.137.0-win32-x64':
     optional: true
+
+  '@opencode-ai/sdk@1.18.3':
+    dependencies:
+      cross-spawn: 7.0.6
 
   '@opentelemetry/api-logs@0.218.0':
     dependencies:

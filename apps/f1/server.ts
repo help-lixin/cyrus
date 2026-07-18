@@ -171,7 +171,8 @@ function createEdgeWorkerConfig(): EdgeWorkerConfig {
 				| "claude"
 				| "gemini"
 				| "codex"
-				| "cursor",
+				| "cursor"
+				| "opencode",
 		}),
 		codexDefaultModel: process.env.CODEX_MODEL || "gpt-5.5",
 		// Enable all tools including Edit(**), Bash, etc. for full testing capability

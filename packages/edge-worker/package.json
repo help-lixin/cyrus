@@ -41,6 +41,7 @@
 		"cyrus-linear-event-transport": "workspace:*",
 		"cyrus-qq-event-transport": "workspace:*",
 		"cyrus-mcp-tools": "workspace:*",
+		"cyrus-opencode-runner": "workspace:*",
 		"cyrus-simple-agent-runner": "workspace:*",
 		"cyrus-slack-event-transport": "workspace:*",
 		"cyrus-weixin-event-transport": "workspace:*",
