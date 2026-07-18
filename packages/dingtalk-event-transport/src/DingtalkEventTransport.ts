@@ -84,6 +84,7 @@ export class DingtalkEventTransport extends EventEmitter {
 			clientSecret: this.config.appSecret,
 			keepAlive: true,
 		});
+		this.client.debug = false;
 
 		// Register the robot message callback
 		this.client.registerCallbackListener(
