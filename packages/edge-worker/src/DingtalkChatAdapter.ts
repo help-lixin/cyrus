@@ -32,6 +32,8 @@ export class DingtalkChatAdapter
 	private repositoryRoutingContext: string;
 	private logger: ILogger;
 	private messageService: DingtalkMessageService;
+	/** Maximum text length for DingTalk messages to avoid API errors */
+	private static readonly MAX_MESSAGE_LENGTH = 2048;
 
 	constructor(
 		repositoryProvider: ChatRepositoryProvider,
@@ -153,13 +155,29 @@ ${this.repositoryRoutingContext ? `\n\n${this.repositoryRoutingContext}` : ""}
 				}
 			}
 
-			await this.sendSessionText(event, summary);
+			// Truncate if message is too long for DingTalk API
+			const truncatedSummary = this.truncateMessage(summary);
+
+			await this.sendSessionText(event, truncatedSummary);
 		} catch (error) {
 			this.logger.error(
 				"Failed to post DingTalk reply",
 				error instanceof Error ? error : new Error(String(error)),
 			);
 		}
+	}
+
+	/**
+	 * Truncate message to fit within DingTalk's message length limit.
+	 * Leaves room for a "..." suffix when truncation occurs.
+	 */
+	private truncateMessage(message: string): string {
+		const maxLength = DingtalkChatAdapter.MAX_MESSAGE_LENGTH;
+		if (message.length <= maxLength) {
+			return message;
+		}
+		// Leave 3 characters for "..."
+		return `${message.slice(0, maxLength - 3)}...`;
 	}
 
 	async acknowledgeReceipt(event: DingtalkWebhookEvent): Promise<void> {
