@@ -27,7 +27,8 @@ export type ChatPlatformName =
 	| "github"
 	| "weixin"
 	| "lark"
-	| "qq";
+	| "qq"
+	| "dingtalk";
 
 export interface ChatPlatformAdapter<TEvent> {
 	readonly platformName: ChatPlatformName;

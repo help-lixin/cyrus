@@ -663,6 +663,23 @@
 			"required": ["appId", "appSecret", "markdownSupport"],
 			"additionalProperties": false
 		},
+		"dingtalkEventTransport": {
+			"type": "object",
+			"properties": {
+				"appKey": {
+					"type": "string"
+				},
+				"appSecret": {
+					"type": "string"
+				},
+				"autoReconnect": {
+					"default": true,
+					"type": "boolean"
+				}
+			},
+			"required": ["appKey", "appSecret", "autoReconnect"],
+			"additionalProperties": false
+		},
 		"prReviewTrigger": {
 			"type": "boolean"
 		},

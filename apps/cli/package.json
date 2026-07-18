@@ -48,6 +48,7 @@
 		"cyrus-config-updater": "workspace:*",
 		"cyrus-core": "workspace:*",
 		"cyrus-edge-worker": "workspace:*",
+		"cyrus-dingtalk-event-transport": "workspace:*",
 		"cyrus-lark-event-transport": "workspace:*",
 		"cyrus-qq-event-transport": "workspace:*",
 		"cyrus-slack-event-transport": "workspace:*",

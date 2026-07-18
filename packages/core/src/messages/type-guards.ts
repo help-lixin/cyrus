@@ -264,3 +264,32 @@ export function hasQQUserPromptPlatformData(
 } {
 	return message.source === "qq";
 }
+
+/**
+ * Type guard to check if message is from DingTalk.
+ */
+export function isDingtalkMessage(message: InternalMessage): boolean {
+	return message.source === "dingtalk";
+}
+
+/**
+ * Type guard for DingTalk platform data in SessionStartMessage.
+ */
+export function hasDingtalkSessionStartPlatformData(
+	message: SessionStartMessage,
+): message is SessionStartMessage & {
+	platformData: import("./types.js").DingtalkSessionStartPlatformData;
+} {
+	return message.source === "dingtalk";
+}
+
+/**
+ * Type guard for DingTalk platform data in UserPromptMessage.
+ */
+export function hasDingtalkUserPromptPlatformData(
+	message: UserPromptMessage,
+): message is UserPromptMessage & {
+	platformData: import("./types.js").DingtalkUserPromptPlatformData;
+} {
+	return message.source === "dingtalk";
+}

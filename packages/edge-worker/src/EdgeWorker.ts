@@ -78,6 +78,10 @@ import {
 	WebhookIpValidator,
 } from "cyrus-core";
 import { CursorRunner } from "cyrus-cursor-runner";
+import {
+	DingtalkEventTransport,
+	type DingtalkWebhookEvent,
+} from "cyrus-dingtalk-event-transport";
 import { GeminiRunner } from "cyrus-gemini-runner";
 import {
 	extractCommentAuthor,
@@ -160,6 +164,7 @@ import { LiveChatRepositoryProvider } from "./ChatRepositoryProvider.js";
 import { ChatSessionHandler } from "./ChatSessionHandler.js";
 import { ConfigManager, type RepositoryChanges } from "./ConfigManager.js";
 import { DefaultSkillsDeployer } from "./DefaultSkillsDeployer.js";
+import { DingtalkChatAdapter } from "./DingtalkChatAdapter.js";
 import { EgressProxy } from "./EgressProxy.js";
 import { GitService } from "./GitService.js";
 import { GlobalSessionRegistry } from "./GlobalSessionRegistry.js";
@@ -242,6 +247,10 @@ export class EdgeWorker extends EventEmitter {
 	private qqEventTransport: QQEventTransport | null = null;
 	private qqChatAdapter: QQChatAdapter | null = null;
 	private qqSessionHandler: ChatSessionHandler<QQWebhookEvent> | null = null;
+	private dingtalkEventTransport: DingtalkEventTransport | null = null;
+	private dingtalkChatAdapter: DingtalkChatAdapter | null = null;
+	private dingtalkSessionHandler: ChatSessionHandler<DingtalkWebhookEvent> | null =
+		null;
 	private chatSessionHandler: ChatSessionHandler<SlackWebhookEvent> | null =
 		null;
 	private gitHubCommentService: GitHubCommentService; // Service for posting comments back to GitHub PRs
@@ -769,6 +778,16 @@ export class EdgeWorker extends EventEmitter {
 				);
 			});
 		}
+
+		// Start DingTalk transport after server is ready
+		if (this.dingtalkEventTransport) {
+			this.startDingtalkTransport().catch((error) => {
+				this.logger.error(
+					"Failed to start DingTalk transport",
+					error instanceof Error ? error : new Error(String(error)),
+				);
+			});
+		}
 	}
 
 	/**
@@ -976,6 +995,17 @@ export class EdgeWorker extends EventEmitter {
 			this.registerQQEventTransport();
 		} else {
 			this.logger.info("📱 QQ event transport NOT configured");
+		}
+
+		// Register DingTalk event transport if configured
+		this.logger.info(
+			`🔍 DingtalkEventTransport check: ${JSON.stringify(this.config.dingtalkEventTransport)}`,
+		);
+		if (this.config.dingtalkEventTransport) {
+			this.logger.info("📱 Registering DingTalk event transport...");
+			this.registerDingtalkEventTransport();
+		} else {
+			this.logger.info("📱 DingTalk event transport NOT configured");
 		}
 
 		// 3. Create and register ConfigUpdater (both platforms)
@@ -1678,6 +1708,130 @@ export class EdgeWorker extends EventEmitter {
 		} catch (error) {
 			this.logger.error(
 				"Failed to start QQ transport",
+				error instanceof Error ? error : new Error(String(error)),
+			);
+			throw error;
+		}
+	}
+
+	/**
+	 * Register DingTalk event transport for DingTalk messaging.
+	 *
+	 * DingTalk uses Stream mode (WebSocket long connection) via
+	 * dingtalk-stream-sdk-nodejs. The transport is started in
+	 * startDingtalkTransport() after the server is ready.
+	 */
+	private registerDingtalkEventTransport(): void {
+		const dingtalkConfig = this.config.dingtalkEventTransport!;
+
+		// Live provider reads from the repository map on demand
+		const chatRepositoryProvider = new LiveChatRepositoryProvider(
+			this.repositories,
+			() => this.config.linearWorkspaces || {},
+		);
+
+		const routingContext =
+			this.promptBuilder.generateRoutingContextForAllWorkspaces();
+
+		this.dingtalkChatAdapter = new DingtalkChatAdapter(
+			chatRepositoryProvider,
+			this.logger,
+			{
+				repositoryRoutingContext: routingContext,
+			},
+		);
+
+		this.dingtalkSessionHandler = new ChatSessionHandler(
+			this.dingtalkChatAdapter,
+			{
+				cyrusHome: this.cyrusHome,
+				chatRepositoryProvider,
+				runnerConfigBuilder: this.runnerConfigBuilder,
+				createRunner: (config) => {
+					const runnerType = this.runnerSelectionService.getDefaultRunner();
+					return this.createRunnerForType(runnerType, {
+						...config,
+						model: this.getDefaultModelForRunner(runnerType),
+						fallbackModel: this.getDefaultFallbackModelForRunner(runnerType),
+					});
+				},
+				// DingTalk doesn't support custom MCP configs yet
+				getPlatformMcpConfigOverrides: () => undefined,
+				resolveSkillsConfig: async ({ repository, repositoryPaths }) => {
+					const plugins = await this.skillsPluginResolver.resolve();
+					const skills = await this.skillsPluginResolver.discoverSkillNames(
+						plugins,
+						{
+							repositoryId: repository?.id,
+							repoPaths: repositoryPaths,
+						},
+					);
+					return { plugins, skills };
+				},
+				onWebhookStart: () => {
+					this.activeWebhookCount++;
+				},
+				onWebhookEnd: () => {
+					this.activeWebhookCount--;
+				},
+				onStateChange: () => this.savePersistedState(),
+				onClaudeError: (error) => this.handleClaudeError(error),
+			},
+			this.logger,
+		);
+
+		this.dingtalkEventTransport = new DingtalkEventTransport({
+			appKey: dingtalkConfig.appKey,
+			appSecret: dingtalkConfig.appSecret,
+			autoReconnect: dingtalkConfig.autoReconnect ?? true,
+			isThreadFollowingEnabled: () => true,
+		});
+
+		// Handle raw events for the DingtalkChatAdapter
+		this.dingtalkEventTransport.on("event", (event: DingtalkWebhookEvent) => {
+			this.dingtalkSessionHandler!.handleEvent(event).catch((error) => {
+				this.logger.error(
+					"Failed to handle DingTalk message",
+					error instanceof Error ? error : new Error(String(error)),
+				);
+			});
+		});
+
+		this.dingtalkEventTransport.on("message", (message: InternalMessage) => {
+			// Also handle via handleMessage for unified processing
+			this.handleMessage(message);
+		});
+
+		this.dingtalkEventTransport.on("error", (error: Error) => {
+			this.handleError(error);
+		});
+
+		this.dingtalkEventTransport.on("connected", () => {
+			this.logger.info("DingTalk WebSocket connected");
+		});
+
+		this.dingtalkEventTransport.on("disconnected", () => {
+			this.logger.info("DingTalk WebSocket disconnected");
+		});
+
+		this.logger.info("DingTalk event transport registered");
+	}
+
+	/**
+	 * Start the DingTalk transport (WebSocket connection).
+	 * This is called after the server is ready.
+	 */
+	private async startDingtalkTransport(): Promise<void> {
+		if (!this.dingtalkEventTransport) {
+			return;
+		}
+
+		try {
+			await this.dingtalkEventTransport.register();
+			this.logger.info("Dingtalk event transport started");
+		} catch (error) {
+			this.logger.error(
+				"Failed to start DingTalk transport",
 				error instanceof Error ? error : new Error(String(error)),
 			);
 			throw error;
@@ -3141,6 +3295,12 @@ ${taskSection}`;
 			this.larkEventTransport = null;
 		}
 		this.larkChatAdapter = null;
+		// Stop DingTalk event transport
+		if (this.dingtalkEventTransport) {
+			this.dingtalkEventTransport.close();
+			this.dingtalkEventTransport = null;
+		}
+		this.dingtalkChatAdapter = null;
 		this.configUpdater = null;
 		this.mcpConfigService.clearAllContexts();
 		this.cyrusToolsMcpSessions.removeAllListeners();

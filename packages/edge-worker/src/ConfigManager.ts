@@ -206,6 +206,9 @@ export class ConfigManager extends EventEmitter {
 					parsedConfig.larkEventTransport ?? this.config.larkEventTransport,
 				qqEventTransport:
 					parsedConfig.qqEventTransport ?? this.config.qqEventTransport,
+				dingtalkEventTransport:
+					parsedConfig.dingtalkEventTransport ??
+					this.config.dingtalkEventTransport,
 				repositories: parsedConfig.repositories || [],
 				ngrokAuthToken:
 					parsedConfig.ngrokAuthToken || this.config.ngrokAuthToken,
@@ -369,6 +372,7 @@ export class ConfigManager extends EventEmitter {
 			"weixinEventTransport",
 			"larkEventTransport",
 			"qqEventTransport",
+			"dingtalkEventTransport",
 		];
 
 		for (const key of globalKeys) {

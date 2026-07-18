@@ -9,6 +9,7 @@
  */
 
 import type {
+	DingtalkPlatformRef,
 	GitHubPlatformRef,
 	GitLabPlatformRef,
 	LarkPlatformRef,
@@ -44,7 +45,8 @@ export type MessageSource =
 	| "slack"
 	| "lark"
 	| "weixin"
-	| "qq";
+	| "qq"
+	| "dingtalk";
 
 // ============================================================================
 // AUTHOR TYPES
@@ -217,6 +219,18 @@ export interface QQSessionStartPlatformData {
 }
 
 /**
+ * DingTalk-specific platform data for session start.
+ */
+export interface DingtalkSessionStartPlatformData {
+	/** Channel where the mention occurred */
+	channel: DingtalkPlatformRef["channel"];
+	/** Thread information */
+	thread: DingtalkPlatformRef["thread"];
+	/** The message that triggered this session */
+	message: DingtalkPlatformRef["message"];
+}
+
+/**
  * Session start message - initiates a new agent session.
  * Triggered by: Linear delegation, PR mention, thread start, etc.
  */
@@ -238,7 +252,8 @@ export interface SessionStartMessage extends InternalMessageBase {
 		| SlackSessionStartPlatformData
 		| LarkSessionStartPlatformData
 		| WeixinSessionStartPlatformData
-		| QQSessionStartPlatformData;
+		| QQSessionStartPlatformData
+		| DingtalkSessionStartPlatformData;
 }
 
 // ============================================================================
@@ -339,6 +354,18 @@ export interface QQUserPromptPlatformData {
 }
 
 /**
+ * DingTalk-specific platform data for user prompt.
+ */
+export interface DingtalkUserPromptPlatformData {
+	/** Channel where the message was sent */
+	channel: DingtalkPlatformRef["channel"];
+	/** Thread information */
+	thread: DingtalkPlatformRef["thread"];
+	/** The message containing the prompt */
+	message: DingtalkPlatformRef["message"];
+}
+
+/**
  * User prompt message - a user message during an active session.
  * Triggered by: Mid-session comments, follow-up questions, etc.
  */
@@ -354,7 +381,8 @@ export interface UserPromptMessage extends InternalMessageBase {
 		| SlackUserPromptPlatformData
 		| LarkUserPromptPlatformData
 		| WeixinUserPromptPlatformData
-		| QQUserPromptPlatformData;
+		| QQUserPromptPlatformData
+		| DingtalkUserPromptPlatformData;
 }
 
 // ============================================================================

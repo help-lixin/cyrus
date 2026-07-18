@@ -518,6 +518,22 @@ export const EdgeConfigSchema = z.object({
 		.optional(),
 
 	/**
+	 * DingTalk event transport configuration.
+	 * When set, Cyrus connects to DingTalk via Stream mode (WebSocket long
+	 * connection) and processes robot messages in groups and 1:1 chats.
+	 */
+	dingtalkEventTransport: z
+		.object({
+			/** DingTalk app key (clientId of the internal enterprise app) */
+			appKey: z.string(),
+			/** DingTalk app secret (clientSecret of the internal enterprise app) */
+			appSecret: z.string(),
+			/** Whether to enable auto-reconnect for the WebSocket connection. Defaults to true. */
+			autoReconnect: z.boolean().optional().default(true),
+		})
+		.optional(),
+
+	/**
 	 * Whether to trigger agent sessions when a pull request review requests changes.
 	 * When disabled, a `pull_request_review` event produces no acknowledgement comment
 	 * and no agent session. Defaults to true if not specified.

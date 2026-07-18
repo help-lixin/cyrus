@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- DingTalk support: Cyrus can now connect to DingTalk via Stream mode (WebSocket long connection, no public callback URL required) and process robot messages in group chats (@mention) and 1:1 chats. Replies, receipt acknowledgements, and busy notifications are sent back through DingTalk session webhooks. Configure with `dingtalkEventTransport: { appKey, appSecret }` in `config.json`.
+
 ### Fixed
 - Forwarded and shared Slack messages are now included when you @mention Cyrus. Previously, forwarding a message (for example a Sentry alert) into a channel and @mentioning Cyrus passed along only your typed comment — the forwarded message's contents were dropped, so a forward with no comment gave Cyrus nothing to work with. The forwarded content is now part of the prompt. ([#1326](https://github.com/cyrusagents/cyrus/pull/1326))
 

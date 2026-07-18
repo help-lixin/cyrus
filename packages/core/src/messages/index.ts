@@ -17,6 +17,7 @@ export type {
 
 // Platform reference types
 export type {
+	DingtalkPlatformRef,
 	GitHubPlatformRef,
 	GitLabPlatformRef,
 	LarkPlatformRef,
@@ -28,6 +29,8 @@ export type {
 
 // Type guards
 export {
+	hasDingtalkSessionStartPlatformData,
+	hasDingtalkUserPromptPlatformData,
 	hasGitHubSessionStartPlatformData,
 	hasGitHubUserPromptPlatformData,
 	hasGitLabSessionStartPlatformData,
@@ -41,6 +44,7 @@ export {
 	hasSlackSessionStartPlatformData,
 	hasSlackUserPromptPlatformData,
 	isContentUpdateMessage,
+	isDingtalkMessage,
 	isGitHubMessage,
 	isGitLabMessage,
 	isIssueStateChangeMessage,
@@ -57,6 +61,9 @@ export {
 export type {
 	ContentChanges,
 	ContentUpdateMessage,
+	// DingTalk platform data types
+	DingtalkSessionStartPlatformData,
+	DingtalkUserPromptPlatformData,
 	GitHubSessionStartPlatformData,
 	GitHubUserPromptPlatformData,
 	// GitLab platform data types

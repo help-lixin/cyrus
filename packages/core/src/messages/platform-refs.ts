@@ -444,3 +444,44 @@ export interface QQPlatformRef {
 		};
 	};
 }
+
+// ============================================================================
+// DINGTALK PLATFORM REFERENCES
+// ============================================================================
+
+/**
+ * DingTalk platform reference types.
+ * DingTalk supports both group chats and 1:1 (single) robot chats.
+ */
+export interface DingtalkPlatformRef {
+	/** Channel data */
+	channel: {
+		/** Conversation ID */
+		id: string;
+		/** Conversation title (for group chats) */
+		name?: string;
+		/** Chat type: 'group' for group chat, 'single' for 1:1 */
+		type: "group" | "single";
+	};
+
+	/** Thread data (DingTalk robots have no thread concept; the message is the anchor) */
+	thread: {
+		/** Message ID */
+		messageId: string;
+	};
+
+	/** Message data */
+	message: {
+		/** Message ID */
+		messageId: string;
+		/** Message text content */
+		text: string;
+		/** Time-limited webhook URL for replying to this message's session */
+		sessionWebhook?: string;
+		/** Message author */
+		user: {
+			id: string;
+			name?: string;
+		};
+	};
+}

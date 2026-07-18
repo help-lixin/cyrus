@@ -190,6 +190,9 @@ export {
 export type {
 	ContentChanges,
 	ContentUpdateMessage,
+	DingtalkPlatformRef,
+	DingtalkSessionStartPlatformData,
+	DingtalkUserPromptPlatformData,
 	GitHubPlatformRef,
 	GitHubSessionStartPlatformData,
 	GitHubUserPromptPlatformData,
@@ -231,6 +234,8 @@ export type {
 	WeixinUserPromptPlatformData,
 } from "./messages/index.js";
 export {
+	hasDingtalkSessionStartPlatformData,
+	hasDingtalkUserPromptPlatformData,
 	hasGitHubSessionStartPlatformData,
 	hasGitHubUserPromptPlatformData,
 	hasGitLabSessionStartPlatformData,
@@ -242,6 +247,7 @@ export {
 	hasSlackSessionStartPlatformData,
 	hasSlackUserPromptPlatformData,
 	isContentUpdateMessage,
+	isDingtalkMessage,
 	isGitHubMessage,
 	isGitLabMessage,
 	isIssueStateChangeMessage,

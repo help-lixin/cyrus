@@ -14,6 +14,8 @@ tempdocs
 # Environment variables
 .env
 
+tsconfig.tsbuildinfo
+
 # Logs
 logs
 *.log
