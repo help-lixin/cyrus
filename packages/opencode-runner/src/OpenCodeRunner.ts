@@ -1,6 +1,11 @@
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
-import { createWriteStream, mkdirSync } from "node:fs";
+import {
+	createWriteStream,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { cwd } from "node:process";
 import type {
@@ -157,7 +162,9 @@ function mapCyrusMcpToOpenCode(
 	mcpConfig: OpenCodeRunnerConfig["mcpConfig"],
 ): Record<string, McpLocalConfig | McpRemoteConfig> {
 	const servers: Record<string, McpLocalConfig | McpRemoteConfig> = {};
-	if (!mcpConfig) return servers;
+	if (!mcpConfig) {
+		return servers;
+	}
 
 	for (const [name, raw] of Object.entries(mcpConfig)) {
 		const cfg = raw as Record<string, unknown>;
@@ -469,10 +476,25 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 			for (const [name, serverConfig] of Object.entries(mcpServers)) {
 				try {
 					await this.client.mcp.add({ body: { name, config: serverConfig } });
-					this.logger.info(`Added MCP server: ${name}`);
+
+					// 尝试连接 MCP 服务器
+					try {
+						await this.client.mcp.connect({ path: { name } });
+					} catch (connectError) {
+						this.logger.warn(
+							`MCP server '${name}' connect failed: ${connectError}`,
+						);
+					}
 				} catch (error) {
-					this.logger.warn(`Failed to add MCP server '${name}': ${error}`);
+					this.logger.error(`Failed to add MCP server '${name}': ${error}`);
 				}
+			}
+
+			// 验证 MCP 服务器状态
+			try {
+				await this.client.mcp.status({});
+			} catch (statusError) {
+				this.logger.warn(`Failed to get MCP server status: ${statusError}`);
 			}
 
 			this.ruleset =
@@ -495,11 +517,7 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 						path: { id: this.config.resumeSessionId },
 					});
 					this.currentSessionId = this.config.resumeSessionId;
-					this.logger.info(`Resuming session ${this.config.resumeSessionId}`);
 				} catch {
-					this.logger.info(
-						`Session ${this.config.resumeSessionId} not found, creating new`,
-					);
 					this.currentSessionId = null;
 				}
 			}
@@ -510,7 +528,6 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 				if (!this.currentSessionId) {
 					throw new Error("Failed to create session: no session ID returned");
 				}
-				this.logger.info(`Created new session ${this.currentSessionId}`);
 			}
 
 			if (this.sessionInfo) {
@@ -538,6 +555,7 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 							this.config.disallowedTools,
 							this.mcpServerNames,
 						);
+
 			const body: Record<string, unknown> = {
 				parts: [{ type: "text", text: prompt }],
 				model: modelParsed || undefined,
@@ -583,8 +601,6 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 				{} as Parameters<typeof this.client.event.subscribe>[0],
 			);
 			const stream = response.stream;
-
-			this.logger.info(`Event stream connected, stream exists: ${!!stream}`);
 
 			let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
@@ -686,14 +702,7 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 						: Array.isArray(patternRaw)
 							? patternRaw[0]
 							: undefined;
-				this.logger.info(
-					`[DEBUG] evaluating permission for ${toolName}, ruleset.allow=${JSON.stringify(this.ruleset.allow)}`,
-				);
 				const decision = evaluatePermission(this.ruleset, toolName, pattern);
-
-				this.logger.info(
-					`Permission requested: ${toolName}${pattern ? ` (${pattern})` : ""} → ${decision}`,
-				);
 
 				if (this.client && this.currentSessionId) {
 					this.pendingPermissions.push({
@@ -746,7 +755,7 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 					this.assistantTextBuffer += textPart.text;
 				} else if (part.type === "tool") {
 					this.flushAssistantTextBuffer();
-					this.handleToolPart(part as ToolPart);
+					void this.handleToolPart(part as ToolPart);
 				} else if (part.type === "compaction") {
 					this.emitSystemActivity("Session auto-compacting context");
 				}
@@ -767,7 +776,7 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 		}
 	}
 
-	private handleToolPart(part: ToolPart): void {
+	private async handleToolPart(part: ToolPart): Promise<void> {
 		const { id: partId, tool: toolName, state } = part;
 
 		if (state.status === "running") {
@@ -788,9 +797,10 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 				});
 			}
 		} else {
+			const input = (state as { input?: ToolInput }).input || {};
 			const { toolName: translatedName, toolInput } = translateOpenCodeToolName(
 				toolName,
-				(state as { input?: ToolInput }).input || {},
+				input,
 				this.mcpServerNames,
 			);
 
@@ -798,7 +808,19 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 			let isError = false;
 
 			if (state.status === "completed") {
-				resultText = (state as { output?: string }).output || "Tool completed";
+				if (translatedName === "Skill") {
+					const skillName = typeof input.name === "string" ? input.name : "";
+					const skillResult = await this.executeSkill(skillName);
+					resultText =
+						skillResult.output || `Skill '${skillName}' executed successfully`;
+					if (skillResult.error) {
+						resultText = skillResult.error;
+						isError = true;
+					}
+				} else {
+					resultText =
+						(state as { output?: string }).output || "Tool completed";
+				}
 			} else if (state.status === "error") {
 				resultText = (state as { error?: string }).error || "Tool failed";
 				isError = true;
@@ -927,6 +949,47 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 		this.pushMessage(message);
 	}
 
+	private async executeSkill(
+		skillName: string,
+	): Promise<{ output?: string; error?: string }> {
+		console.log(`[DEBUG executeSkill] Loading skill: ${skillName}`);
+
+		const plugins = this.config.plugins || [];
+		const searchPaths: string[] = [];
+
+		for (const plugin of plugins) {
+			if (plugin.type === "local" && plugin.path) {
+				searchPaths.push(resolve(plugin.path));
+			}
+		}
+
+		searchPaths.push(resolve(this.config.cyrusHome, "user-skills-plugin"));
+		searchPaths.push(resolve(this.config.cyrusHome, "cyrus-skills-plugin"));
+
+		for (const basePath of searchPaths) {
+			const skillPath = join(basePath, skillName, "SKILL.md");
+			console.log(`[DEBUG executeSkill] Checking: ${skillPath}`);
+			if (existsSync(skillPath)) {
+				try {
+					const content = readFileSync(skillPath, "utf-8");
+					console.log(`[DEBUG executeSkill] Loaded skill from: ${skillPath}`);
+					return { output: content };
+				} catch (error) {
+					console.log(
+						`[DEBUG executeSkill] Failed to read: ${skillPath}, error: ${error}`,
+					);
+					return { error: `Failed to read skill file: ${error}` };
+				}
+			}
+		}
+
+		const searchPathsStr = searchPaths.join(", ");
+		console.log(
+			`[DEBUG executeSkill] Skill not found: ${skillName} in [${searchPathsStr}]`,
+		);
+		return { error: `Skill '${skillName}' not found in any plugin directory` };
+	}
+
 	private pushAssistantText(text: string): void {
 		const message: SDKAssistantMessage = {
 			type: "assistant",
@@ -950,6 +1013,15 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 		if (this.hasInitMessage) return;
 		this.hasInitMessage = true;
 		const sessionId = this.sessionInfo?.sessionId || crypto.randomUUID();
+
+		const skills: string[] =
+			this.config.skills === "all" || this.config.skills === undefined
+				? []
+				: this.config.skills;
+
+		const plugins: { name: string; path: string }[] =
+			this.config.plugins?.map((p) => ({ name: p.path, path: p.path })) || [];
+
 		const initMessage: SDKSystemInitMessage = {
 			type: "system",
 			subtype: "init",
@@ -963,8 +1035,8 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 			claude_code_version: "opencode-agent",
 			slash_commands: [],
 			output_style: "default",
-			skills: [],
-			plugins: [],
+			skills,
+			plugins,
 			uuid: crypto.randomUUID(),
 			agents: undefined,
 		};

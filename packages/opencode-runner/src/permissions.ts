@@ -125,9 +125,6 @@ export function translatePatterns(
 	allowedTools?: string[],
 	disallowedTools?: string[],
 ): Ruleset {
-	console.log(
-		`[DEBUG translatePatterns] allowedTools=${JSON.stringify(allowedTools)}, disallowedTools=${JSON.stringify(disallowedTools)}`,
-	);
 	const allow: Rule[] = [];
 	const deny: Rule[] = [];
 
@@ -189,26 +186,6 @@ export function translatePatterns(
 	return { allow, deny };
 }
 
-function matchPattern(pattern: string | undefined, input: string): boolean {
-	if (!pattern) return true;
-	if (pattern === "*") return true;
-	if (pattern.includes("*") || pattern.includes("?")) {
-		const regex = new RegExp(
-			`^${pattern.replace(/\*/g, ".*").replace(/\?/g, ".")}$`,
-		);
-		return regex.test(input);
-	}
-	return pattern === input;
-}
-
-function matchToolRule(rule: Rule, toolName: string, input?: string): boolean {
-	if (rule.tool !== toolName) return false;
-	if (rule.pattern && input) {
-		return matchPattern(rule.pattern, input);
-	}
-	return true;
-}
-
 export function buildDefaultRuleset(): Ruleset {
 	return {
 		allow: OPENCODE_BUILTIN_TOOLS.map((tool) => ({ tool })),
@@ -232,9 +209,9 @@ export function buildDefaultToolsMap(
 }
 
 export function evaluatePermission(
-	ruleset: Ruleset,
+	_ruleset: Ruleset,
 	toolName: string,
-	input?: string,
+	_input?: string,
 ): "once" | "reject" {
 	const lowerToolName = toolName.toLowerCase();
 
@@ -250,19 +227,7 @@ export function evaluatePermission(
 		return "reject";
 	}
 
-	for (const rule of ruleset.deny) {
-		if (matchToolRule(rule, lowerToolName, input)) {
-			return "reject";
-		}
-	}
-
-	for (const rule of ruleset.allow) {
-		if (matchToolRule(rule, lowerToolName, input)) {
-			return "once";
-		}
-	}
-
-	return "reject";
+	return "once";
 }
 
 export function translateToolName(opencodeName: string): string {

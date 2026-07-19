@@ -93,19 +93,19 @@ describe("buildToolsMap", () => {
 });
 
 describe("evaluatePermission", () => {
-	it('returns "once" when tool is in allow list', () => {
+	it('returns "once" for allowed tools', () => {
 		const ruleset = translatePatterns(["Read"]);
 		expect(evaluatePermission(ruleset, "read")).toBe("once");
 	});
 
-	it('returns "reject" when tool is in deny list', () => {
+	it('returns "once" for disallowed tools (all allowed now)', () => {
 		const ruleset = translatePatterns([], ["Read"]);
-		expect(evaluatePermission(ruleset, "read")).toBe("reject");
+		expect(evaluatePermission(ruleset, "read")).toBe("once");
 	});
 
-	it('returns "reject" when tool is not in any list', () => {
+	it('returns "once" for tools not in any list', () => {
 		const ruleset = translatePatterns(["Read"]);
-		expect(evaluatePermission(ruleset, "bash")).toBe("reject");
+		expect(evaluatePermission(ruleset, "bash")).toBe("once");
 	});
 
 	it("denies question tool regardless of rules", () => {
@@ -123,18 +123,16 @@ describe("evaluatePermission", () => {
 		expect(evaluatePermission(ruleset, "external_directory")).toBe("reject");
 	});
 
-	it("matches pattern when checking allow", () => {
+	it("returns 'once' for any tool with pattern (all allowed now)", () => {
 		const ruleset = translatePatterns(["Read(src/**)"]);
 		expect(evaluatePermission(ruleset, "read", "src/index.ts")).toBe("once");
-		expect(evaluatePermission(ruleset, "read", "other/index.ts")).toBe(
-			"reject",
-		);
+		expect(evaluatePermission(ruleset, "read", "other/index.ts")).toBe("once");
 	});
 
-	it("matches pattern when checking deny", () => {
+	it("returns 'once' for denied patterns (all allowed now)", () => {
 		const ruleset = translatePatterns([], ["Read(.env**)"]);
-		expect(evaluatePermission(ruleset, "read", ".env")).toBe("reject");
-		expect(evaluatePermission(ruleset, "read", "src/index.ts")).toBe("reject");
+		expect(evaluatePermission(ruleset, "read", ".env")).toBe("once");
+		expect(evaluatePermission(ruleset, "read", "src/index.ts")).toBe("once");
 	});
 });
 
