@@ -125,10 +125,16 @@ export function translatePatterns(
 	allowedTools?: string[],
 	disallowedTools?: string[],
 ): Ruleset {
+	console.log(
+		`[DEBUG translatePatterns] allowedTools=${JSON.stringify(allowedTools)}, disallowedTools=${JSON.stringify(disallowedTools)}`,
+	);
 	const allow: Rule[] = [];
 	const deny: Rule[] = [];
 
 	const processTool = (tool: string, isDeny: boolean) => {
+		console.log(
+			`[DEBUG processTool] processing tool=${tool}, isDeny=${isDeny}`,
+		);
 		if (tool.toLowerCase().startsWith("mcp__")) {
 			const parts = tool.split("__");
 			if (parts.length >= 3) {
@@ -147,7 +153,13 @@ export function translatePatterns(
 		const parsed = parseToolPattern(tool);
 		if (!parsed) return;
 
-		const opencodeName = TOOL_NAME_MAP[parsed.name];
+		const capitalized =
+			parsed.name.charAt(0).toUpperCase() + parsed.name.slice(1).toLowerCase();
+		const opencodeName =
+			TOOL_NAME_MAP[capitalized as keyof typeof TOOL_NAME_MAP];
+		console.log(
+			`[DEBUG processTool] parsed.name=${parsed.name}, capitalized=${capitalized}, opencodeName=${opencodeName}`,
+		);
 		if (!opencodeName) return;
 
 		const rule: Rule = { tool: opencodeName };
@@ -195,6 +207,28 @@ function matchToolRule(rule: Rule, toolName: string, input?: string): boolean {
 		return matchPattern(rule.pattern, input);
 	}
 	return true;
+}
+
+export function buildDefaultRuleset(): Ruleset {
+	return {
+		allow: OPENCODE_BUILTIN_TOOLS.map((tool) => ({ tool })),
+		deny: [],
+	};
+}
+
+export function buildDefaultToolsMap(
+	mcpServerNames?: string[],
+): Record<string, boolean> {
+	const toolsMap: Record<string, boolean> = {};
+	for (const tool of OPENCODE_BUILTIN_TOOLS) {
+		toolsMap[tool] = true;
+	}
+	if (mcpServerNames) {
+		for (const server of mcpServerNames) {
+			toolsMap[`${server}_*`] = true;
+		}
+	}
+	return toolsMap;
 }
 
 export function evaluatePermission(

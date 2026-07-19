@@ -1,12 +1,11 @@
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
-import { createWriteStream, existsSync, mkdirSync } from "node:fs";
+import { createWriteStream, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cwd } from "node:process";
 import type {
 	AssistantMessage,
 	Event,
-	GlobalEvent,
 	McpLocalConfig,
 	McpRemoteConfig,
 	OpencodeClient,
@@ -21,9 +20,12 @@ import type {
 	SDKResultMessage,
 	SDKUserMessage,
 } from "cyrus-core";
+import { createLogger } from "cyrus-core";
 import { OpenCodeMessageFormatter } from "./formatter.js";
 import { getOpenCodeServerManager } from "./OpenCodeServerManager.js";
 import {
+	buildDefaultRuleset,
+	buildDefaultToolsMap,
 	buildToolsMap,
 	evaluatePermission,
 	translatePatterns,
@@ -369,6 +371,7 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 	readonly supportsStreamingInput = false;
 
 	private config: OpenCodeRunnerConfig;
+	private logger: ReturnType<typeof createLogger>;
 	private sessionInfo: OpenCodeSessionInfo | null = null;
 	private messages: SDKMessage[] = [];
 	private formatter: IMessageFormatter;
@@ -398,6 +401,7 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 	constructor(config: OpenCodeRunnerConfig) {
 		super();
 		this.config = config;
+		this.logger = createLogger({ component: "OpenCodeRunner" });
 		this.formatter = new OpenCodeMessageFormatter();
 
 		if (config.onMessage) this.on("message", config.onMessage);
@@ -417,6 +421,13 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 			isRunning: true,
 		};
 
+		const isResumed = !!this.config.resumeSessionId;
+		this.logger.event(isResumed ? "session_resumed" : "session_started", {
+			resumeSessionId: this.config.resumeSessionId,
+			workingDirectory: this.config.workingDirectory,
+			opencodeSessionId: this.sessionInfo?.sessionId,
+		});
+
 		this.messages = [];
 		this.pendingResultMessage = null;
 		this.hasInitMessage = false;
@@ -434,7 +445,7 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 		this.emittedToolUseIds.clear();
 		this.pendingPermissions = [];
 		this.isSessionIdle = false;
-		this.setupLogging(initialSessionId);
+		this.setupLogging();
 
 		const workspace = resolve(this.config.workingDirectory || cwd());
 
@@ -458,17 +469,24 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 			for (const [name, serverConfig] of Object.entries(mcpServers)) {
 				try {
 					await this.client.mcp.add({ body: { name, config: serverConfig } });
-					console.log(`[OpenCodeRunner] Added MCP server: ${name}`);
+					this.logger.info(`Added MCP server: ${name}`);
 				} catch (error) {
-					console.warn(
-						`[OpenCodeRunner] Failed to add MCP server '${name}': ${error}`,
-					);
+					this.logger.warn(`Failed to add MCP server '${name}': ${error}`);
 				}
 			}
 
-			this.ruleset = translatePatterns(
-				this.config.allowedTools,
-				this.config.disallowedTools,
+			this.ruleset =
+				!this.config.allowedTools || this.config.allowedTools.length === 0
+					? buildDefaultRuleset()
+					: translatePatterns(
+							this.config.allowedTools,
+							this.config.disallowedTools,
+						);
+			this.logger.debug(
+				`ruleset built: allow=${JSON.stringify(this.ruleset.allow)}, deny=${JSON.stringify(this.ruleset.deny)}`,
+			);
+			this.logger.debug(
+				`ruleset built: allow=${JSON.stringify(this.ruleset.allow)}, deny=${JSON.stringify(this.ruleset.deny)}`,
 			);
 
 			if (this.config.resumeSessionId) {
@@ -477,12 +495,10 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 						path: { id: this.config.resumeSessionId },
 					});
 					this.currentSessionId = this.config.resumeSessionId;
-					console.log(
-						`[OpenCodeRunner] Resuming session ${this.config.resumeSessionId}`,
-					);
+					this.logger.info(`Resuming session ${this.config.resumeSessionId}`);
 				} catch {
-					console.log(
-						`[OpenCodeRunner] Session ${this.config.resumeSessionId} not found, creating new`,
+					this.logger.info(
+						`Session ${this.config.resumeSessionId} not found, creating new`,
 					);
 					this.currentSessionId = null;
 				}
@@ -494,13 +510,17 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 				if (!this.currentSessionId) {
 					throw new Error("Failed to create session: no session ID returned");
 				}
-				console.log(
-					`[OpenCodeRunner] Created new session ${this.currentSessionId}`,
-				);
+				this.logger.info(`Created new session ${this.currentSessionId}`);
 			}
 
 			if (this.sessionInfo) {
 				this.sessionInfo.sessionId = this.currentSessionId;
+			}
+
+			if (this.currentSessionId) {
+				this.logger.event("opencode_session_id_assigned", {
+					opencodeSessionId: this.currentSessionId,
+				});
 			}
 
 			this.emitInitMessage();
@@ -510,15 +530,19 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 			const eventPromise = this.subscribeToEvents();
 
 			const modelParsed = parseModelString(this.config.model || "");
+			const tools =
+				!this.config.allowedTools || this.config.allowedTools.length === 0
+					? buildDefaultToolsMap(this.mcpServerNames)
+					: buildToolsMap(
+							this.config.allowedTools,
+							this.config.disallowedTools,
+							this.mcpServerNames,
+						);
 			const body: Record<string, unknown> = {
 				parts: [{ type: "text", text: prompt }],
 				model: modelParsed || undefined,
 				system: this.config.appendSystemPrompt || undefined,
-				tools: buildToolsMap(
-					this.config.allowedTools,
-					this.config.disallowedTools,
-					this.mcpServerNames,
-				),
+				tools,
 			};
 
 			await this.client.session.promptAsync({
@@ -552,40 +576,69 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 		const signal = this.abortController?.signal;
 		if (!signal) return;
 
+		const EVENT_TIMEOUT_MS = 120_000;
+
 		try {
 			const response = await this.client.event.subscribe(
 				{} as Parameters<typeof this.client.event.subscribe>[0],
 			);
 			const stream = response.stream;
 
+			this.logger.info(`Event stream connected, stream exists: ${!!stream}`);
+
+			let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+			const resetTimeout = () => {
+				if (timeoutHandle) {
+					clearTimeout(timeoutHandle);
+				}
+				timeoutHandle = setTimeout(() => {
+					if (!signal.aborted && !this.isSessionIdle) {
+						this.logger.error(
+							`No events received for ${EVENT_TIMEOUT_MS}ms, aborting SSE connection`,
+						);
+						this.abortController?.abort();
+					}
+				}, EVENT_TIMEOUT_MS);
+			};
+
+			resetTimeout();
+
 			try {
 				for await (const eventData of stream) {
 					if (signal.aborted || this.isSessionIdle) break;
 
+					resetTimeout();
+
 					try {
-						const globalEvent = eventData as unknown as GlobalEvent;
-						if (
-							globalEvent.directory &&
-							globalEvent.directory !== this.config.workingDirectory
-						) {
-							continue;
-						}
-						this.handleEvent(globalEvent.payload as Event);
-					} catch {}
+						// event.subscribe() returns Event objects directly via SSE
+						this.handleEvent(eventData as Event);
+					} catch (err) {
+						this.logger.error(`Error handling event: ${err}`);
+					}
+				}
+			} catch (streamError) {
+				if (!this.isSessionIdle && !signal.aborted) {
+					this.logger.error(`Stream error: ${streamError}`);
 				}
 			} finally {
+				if (timeoutHandle) {
+					clearTimeout(timeoutHandle);
+				}
 				if (stream && typeof stream.return === "function") {
 					await stream.return(undefined);
 				}
 			}
 		} catch (error) {
 			if (!this.isSessionIdle) {
-				console.error(`[OpenCodeRunner] Event subscription error: ${error}`);
+				this.logger.error(`Event subscription error: ${error}`);
 			}
 		}
 	}
 
 	private handleEvent(event: Event): void {
+		this.logger.debug(`handleEvent: ${event.type}`);
+
 		switch (event.type) {
 			case "session.idle":
 				this.isSessionIdle = true;
@@ -593,6 +646,7 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 				break;
 
 			case "session.error":
+				this.logger.warn(`Session error: ${JSON.stringify(event.properties)}`);
 				if (event.properties.error) {
 					const errorMsg =
 						typeof event.properties.error === "object" &&
@@ -605,11 +659,64 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 				break;
 
 			case "session.status":
+				this.logger.debug(
+					`Session status: ${JSON.stringify(event.properties)}`,
+				);
 				break;
 
 			case "session.compacted":
-				this.emitSystemActivity("Session compacted due to context limits");
+				this.emitSystemActivity("Session auto-compacting context");
 				break;
+
+			case "permission.asked" as Event["type"]:
+			case "permission.updated": {
+				const permission = event.properties as {
+					id: string;
+					sessionID: string;
+					type?: string;
+					permission?: string;
+					pattern?: string | string[];
+				};
+
+				const toolName = permission.type || permission.permission || "unknown";
+				const patternRaw = permission.pattern;
+				const pattern =
+					typeof patternRaw === "string"
+						? patternRaw
+						: Array.isArray(patternRaw)
+							? patternRaw[0]
+							: undefined;
+				this.logger.info(
+					`[DEBUG] evaluating permission for ${toolName}, ruleset.allow=${JSON.stringify(this.ruleset.allow)}`,
+				);
+				const decision = evaluatePermission(this.ruleset, toolName, pattern);
+
+				this.logger.info(
+					`Permission requested: ${toolName}${pattern ? ` (${pattern})` : ""} → ${decision}`,
+				);
+
+				if (this.client && this.currentSessionId) {
+					this.pendingPermissions.push({
+						id: permission.id,
+						sessionID: permission.sessionID,
+					});
+					const response = decision === "once" ? "once" : "reject";
+					this.client
+						.postSessionIdPermissionsPermissionId({
+							path: {
+								id: this.currentSessionId,
+								permissionID: permission.id,
+							},
+							body: { response: response as "once" | "always" | "reject" },
+						} as unknown as Parameters<
+							typeof this.client.postSessionIdPermissionsPermissionId
+						>[0])
+						.catch((err: unknown) =>
+							this.logger.warn(`Permission response failed: ${err}`),
+						);
+				}
+				break;
+			}
 
 			case "message.updated":
 				if (event.properties.info.role === "assistant") {
@@ -646,43 +753,6 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 				break;
 			}
 
-			case "permission.updated": {
-				const permission = event.properties;
-				this.pendingPermissions.push({
-					id: permission.id,
-					sessionID: permission.sessionID,
-				});
-
-				const toolName = permission.type;
-				const pattern =
-					typeof permission.pattern === "string"
-						? permission.pattern
-						: Array.isArray(permission.pattern)
-							? permission.pattern[0]
-							: undefined;
-				const decision = evaluatePermission(this.ruleset, toolName, pattern);
-
-				if (this.client && this.currentSessionId) {
-					const response = decision === "once" ? "once" : "reject";
-					this.client
-						.postSessionIdPermissionsPermissionId({
-							path: {
-								id: this.currentSessionId,
-								permissionID: permission.id,
-							},
-							body: { response: response as "once" | "always" | "reject" },
-						} as unknown as Parameters<
-							typeof this.client.postSessionIdPermissionsPermissionId
-						>[0])
-						.catch((err: unknown) =>
-							console.warn(
-								`[OpenCodeRunner] Permission response failed: ${err}`,
-							),
-						);
-				}
-				break;
-			}
-
 			case "permission.replied": {
 				const { permissionID } = event.properties;
 				this.pendingPermissions = this.pendingPermissions.filter(
@@ -692,6 +762,7 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 			}
 
 			default:
+				this.logger.debug(`Unhandled event type: ${event.type}`);
 				break;
 		}
 	}
@@ -756,6 +827,10 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 	stop(): void {
 		this.isSessionIdle = true;
 
+		this.logger.event("session_stop_requested", {
+			opencodeSessionId: this.sessionInfo?.sessionId,
+		});
+
 		if (this.client && this.currentSessionId) {
 			this.client.session
 				.abort({ path: { id: this.currentSessionId } } as Parameters<
@@ -783,6 +858,11 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 		if (this.abortController) {
 			this.abortController.abort();
 		}
+
+		this.logger.event("session_stopped", {
+			reason: "user_abort",
+			opencodeSessionId: this.sessionInfo?.sessionId,
+		});
 
 		if (this.sessionInfo) {
 			this.sessionInfo.isRunning = false;
@@ -953,21 +1033,43 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 
 	private pushMessage(message: SDKMessage): void {
 		this.messages.push(message);
+
+		// Log to detailed JSON log
+		if (this.logStream) {
+			const logEntry = {
+				type: "sdk-message",
+				message,
+				timestamp: new Date().toISOString(),
+			};
+			this.logStream.write(`${JSON.stringify(logEntry)}\n`);
+		}
+
 		this.emit("message", message);
+
+		this.logger.event("message_emitted", {
+			messageType: message.type,
+			opencodeSessionId: this.sessionInfo?.sessionId,
+		});
 	}
 
-	private setupLogging(sessionId: string): void {
+	private setupLogging(): void {
 		try {
 			const logsDir = join(this.config.cyrusHome, "logs");
-			if (!existsSync(logsDir)) {
-				mkdirSync(logsDir, { recursive: true });
-			}
-			const stream = createWriteStream(
-				join(logsDir, `opencode-${sessionId}.jsonl`),
-				{
-					flags: "a",
-				},
-			);
+			const workspaceName =
+				this.config.workspaceName ||
+				(this.config.workingDirectory
+					? this.config.workingDirectory.split("/").pop()
+					: "default") ||
+				"default";
+			const workspaceLogsDir = join(logsDir, workspaceName);
+			mkdirSync(workspaceLogsDir, { recursive: true });
+
+			const sessionId = this.sessionInfo?.sessionId || "pending";
+			const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+			const detailedLogFileName = `session-${sessionId}-${timestamp}.jsonl`;
+			const detailedLogPath = join(workspaceLogsDir, detailedLogFileName);
+
+			const stream = createWriteStream(detailedLogPath, { flags: "a" });
 			stream.on("error", () => {});
 			this.logStream = stream;
 		} catch {
@@ -1000,12 +1102,22 @@ export class OpenCodeRunner extends EventEmitter implements IAgentRunner {
 		this.pushMessage(resultMessage);
 		this.emit("complete", [...this.messages]);
 
+		this.logger.event("session_completed", {
+			messageCount: this.messages.length,
+			opencodeSessionId: this.sessionInfo?.sessionId,
+		});
+
 		if (error || this.errorMessages.length > 0) {
 			const err =
 				error instanceof Error
 					? error
 					: new Error(this.errorMessages.at(-1) || "OpenCode execution failed");
 			this.emit("error", err);
+
+			this.logger.event("session_stopped", {
+				reason: "user_abort",
+				opencodeSessionId: this.sessionInfo?.sessionId,
+			});
 		}
 
 		this.cleanupRuntimeState();

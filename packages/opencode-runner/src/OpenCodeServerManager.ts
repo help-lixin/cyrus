@@ -1,4 +1,7 @@
 import { createServer } from "node:net";
+import { createLogger } from "cyrus-core";
+
+const logger = createLogger({ component: "OpenCodeServerManager" });
 
 let serverInstance: OpenCodeServerManager | null = null;
 
@@ -41,8 +44,8 @@ export class OpenCodeServerManager {
 
 	async acquire(): Promise<{ url: string }> {
 		if (process.env.CYRUS_OPENCODE_SERVER_URL) {
-			console.log(
-				`[OpenCodeServerManager] Using external server: ${process.env.CYRUS_OPENCODE_SERVER_URL}`,
+			logger.info(
+				`Using external server: ${process.env.CYRUS_OPENCODE_SERVER_URL}`,
 			);
 			this.activeSessions++;
 			this.cancelIdleTimeout();
@@ -62,7 +65,7 @@ export class OpenCodeServerManager {
 					return { url: this.server.url };
 				}
 			} catch {
-				console.log("[OpenCodeServerManager] Server unhealthy, respawning...");
+				logger.info("Server unhealthy, respawning...");
 				await this.spawnServer();
 				this.activeSessions++;
 				this.cancelIdleTimeout();
@@ -87,9 +90,7 @@ export class OpenCodeServerManager {
 		const port = await this.findFreePort();
 		const { createOpencodeServer } = await import("@opencode-ai/sdk");
 
-		console.log(
-			`[OpenCodeServerManager] Spawning opencode serve on 127.0.0.1:${port}`,
-		);
+		logger.info(`Spawning opencode serve on 127.0.0.1:${port}`);
 
 		this.server = await createOpencodeServer({
 			hostname: "127.0.0.1",
@@ -98,7 +99,7 @@ export class OpenCodeServerManager {
 			config: this.BASE_CONFIG,
 		});
 
-		console.log(`[OpenCodeServerManager] Server started at ${this.server.url}`);
+		logger.info(`Server started at ${this.server.url}`);
 	}
 
 	release(): void {
@@ -112,9 +113,7 @@ export class OpenCodeServerManager {
 		this.cancelIdleTimeout();
 		this.idleTimeout = setTimeout(async () => {
 			if (this.activeSessions === 0 && this.server) {
-				console.log(
-					"[OpenCodeServerManager] Idle timeout reached, closing server...",
-				);
+				logger.info("Idle timeout reached, closing server...");
 				await this.shutdown();
 			}
 		}, this.IDLE_TIMEOUT_MS);
@@ -132,9 +131,9 @@ export class OpenCodeServerManager {
 		if (this.server) {
 			try {
 				this.server.close();
-				console.log("[OpenCodeServerManager] Server shutdown complete");
+				logger.info("Server shutdown complete");
 			} catch (error) {
-				console.error(`[OpenCodeServerManager] Error closing server: ${error}`);
+				logger.error(`Error closing server: ${error}`);
 			}
 			this.server = null;
 		}

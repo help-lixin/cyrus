@@ -113,8 +113,7 @@ export class SimpleCodexRunner<T extends string> extends SimpleAgentRunner<T> {
 			if (
 				message.type === "assistant" &&
 				"message" in message &&
-				message.message &&
-				message.message.content
+				message.message?.content
 			) {
 				// Extract text from content blocks
 				for (const block of message.message.content) {
@@ -210,8 +209,7 @@ export class SimpleCodexRunner<T extends string> extends SimpleAgentRunner<T> {
 		if (
 			message.type === "assistant" &&
 			"message" in message &&
-			message.message &&
-			message.message.content
+			message.message?.content
 		) {
 			for (const block of message.message.content) {
 				if (typeof block === "object" && block !== null && "type" in block) {
